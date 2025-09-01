@@ -1,0 +1,44 @@
+# Production docker-compose configuration
+# Usage: docker-compose -f docker-compose.prod.yml up -d
+
+services:
+  synapse-bot:
+    build: .
+    container_name: synapse-telegram-bot-prod
+    restart: always
+    environment:
+      # Required environment variables - set these in your .env file
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
+      
+      # Production environment variables
+      - DATABASE_PATH=/app/data/bot_database.db
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - RATE_LIMIT_MESSAGES_PER_MINUTE=${RATE_LIMIT_MESSAGES_PER_MINUTE:-10}
+      - RATE_LIMIT_WINDOW_SECONDS=${RATE_LIMIT_WINDOW_SECONDS:-60}
+    volumes:
+      # Persist database data
+      - bot_data:/app/data
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    # Production logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    # Security options
+    read_only: false
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  bot_data:
+    driver: local
