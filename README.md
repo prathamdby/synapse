@@ -24,8 +24,6 @@ A sophisticated Telegram bot powered by Cerebras AI that delivers intelligent co
 
 ### Installation
 
-#### Option 1: Local Development
-
 1. **Clone and setup**
 
    ```bash
@@ -41,116 +39,23 @@ A sophisticated Telegram bot powered by Cerebras AI that delivers intelligent co
    # Edit .env with your tokens
    ```
 
-3. **Run the bot**
-   ```bash
-   uv run python main.py
-   ```
+#### Docker Deployment
 
-#### Option 2: Docker Deployment
-
-1. **Clone the repository**
-
-   ```bash
-   git clone https://github.com/prathamdby/synapse.git
-   cd synapse
-   ```
-
-2. **Configure environment**
-
+1. **Setup environment**
    ```bash
    cp .env.example .env
    # Edit .env with your tokens
    ```
 
-3. **Run with Docker Compose** (Recommended)
-
+2. **Run with Docker Compose**
    ```bash
    docker-compose up -d
    ```
 
-4. **Or build and run manually**
-
+3. **Run the bot**
    ```bash
-   # Build the image
-   docker build -t synapse-bot .
-   
-   # Run the container
-   docker run -d \
-     --name synapse-bot \
-     --env-file .env \
-     -v $(pwd)/data:/app/data \
-     synapse-bot
+   uv run python main.py
    ```
-
-5. **Using UV in Docker** (Alternative)
-
-   If you prefer to use UV in Docker:
-   ```bash
-   docker build -f Dockerfile.uv -t synapse-bot:uv .
-   ```
-
-## 🐳 Docker Deployment
-
-### Quick Start with Docker
-
-The easiest way to deploy Synapse is using Docker:
-
-```bash
-# Clone the repository
-git clone https://github.com/prathamdby/synapse.git
-cd synapse
-
-# Copy and configure environment
-cp .env.example .env
-# Edit .env with your API keys
-
-# Start with docker-compose (recommended)
-docker-compose up -d
-
-# View logs
-docker-compose logs -f synapse-bot
-```
-
-### Docker Environment Variables
-
-The container supports all the same environment variables as the local installation:
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `TELEGRAM_BOT_TOKEN` | Yes | - | Your Telegram bot token |
-| `CEREBRAS_API_KEY` | Yes | - | Your Cerebras API key |
-| `DATABASE_PATH` | No | `/app/data/bot_database.db` | Database file path |
-| `LOG_LEVEL` | No | `INFO` | Logging level |
-| `RATE_LIMIT_MESSAGES_PER_MINUTE` | No | `10` | Rate limiting |
-| `RATE_LIMIT_WINDOW_SECONDS` | No | `60` | Rate limit window |
-
-### Docker Volumes
-
-- `/app/data` - Database and persistent data storage
-
-### Building Custom Images
-
-To build your own image:
-
-```bash
-# Standard build using pip
-docker build -t my-synapse-bot .
-
-# Alternative build using UV (requires internet access)
-docker build -f Dockerfile.uv -t my-synapse-bot:uv .
-```
-
-### Development with Docker
-
-For development, you can use the override configuration:
-
-```bash
-# Copy the development override
-cp docker-compose.override.yml.example docker-compose.override.yml
-
-# Start in development mode
-docker-compose up
-```
 
 ## ⚙️ Configuration
 
