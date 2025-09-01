@@ -4,7 +4,7 @@ WORKDIR /app
 
 RUN pip install uv
 COPY pyproject.toml .
-RUN uv pip install --system .
+RUN uv sync
 
 COPY . .
 
