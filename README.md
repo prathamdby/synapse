@@ -17,12 +17,48 @@ A sophisticated Telegram bot powered by Cerebras AI that delivers intelligent co
 
 ### Prerequisites
 
-- Python 3.11+
-- UV package manager
 - [Telegram Bot Token](https://t.me/botfather)
 - [Cerebras API Key](https://cloud.cerebras.ai/)
 
-### Installation
+Choose your preferred deployment method:
+
+### Option 1: Docker Deployment (Recommended)
+
+**Prerequisites:**
+
+- Docker & Docker Compose
+
+**Steps:**
+
+1. **Clone the repository**
+
+   ```bash
+   git clone https://github.com/prathamdby/synapse.git
+   cd synapse
+   ```
+
+2. **Configure environment**
+
+   ```bash
+   cp .env.example .env
+   # Edit .env with your API tokens
+   ```
+
+3. **Run with Docker Compose**
+   ```bash
+   docker-compose up -d
+   ```
+
+The bot will automatically start and data will persist in the `./data` directory.
+
+### Option 2: Manual Installation
+
+**Prerequisites:**
+
+- Python 3.11+
+- UV package manager
+
+**Steps:**
 
 1. **Clone and setup**
 
@@ -36,25 +72,12 @@ A sophisticated Telegram bot powered by Cerebras AI that delivers intelligent co
 
    ```bash
    cp .env.example .env
-   # Edit .env with your tokens
-   ```
-
-#### Docker Deployment
-
-1. **Setup environment**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your tokens
-   ```
-
-2. **Run with Docker Compose**
-   ```bash
-   docker-compose up -d
+   # Edit .env with your API tokens
    ```
 
 3. **Run the bot**
    ```bash
-   uv run python main.py
+   uv run main.py
    ```
 
 ## ⚙️ Configuration
@@ -66,12 +89,15 @@ Create a `.env` file:
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
 CEREBRAS_API_KEY=your_cerebras_api_key
 
-# Optional
-DATABASE_PATH=./bot_database.db
+# Optional (defaults shown)
+DATABASE_PATH=/app/data/bot_database.db  # For Docker deployment
+# DATABASE_PATH=./bot_database.db        # For manual installation
 LOG_LEVEL=INFO
 RATE_LIMIT_MESSAGES_PER_MINUTE=10
 RATE_LIMIT_WINDOW_SECONDS=60
 ```
+
+**Note**: For Docker deployment, use `/app/data/bot_database.db` to ensure data persists across container rebuilds.
 
 ### Getting API Keys
 

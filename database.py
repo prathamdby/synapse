@@ -18,6 +18,10 @@ class DatabaseManager:
 
     async def initialize_database(self):
         """Initialize the database with required tables."""
+        # Ensure the database directory exists
+        db_dir = Path(self.db_path).parent
+        db_dir.mkdir(parents=True, exist_ok=True)
+
         async with aiosqlite.connect(self.db_path) as db:
             # Check if we need to migrate the users table
             await self._migrate_database(db)
