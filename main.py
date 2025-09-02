@@ -15,7 +15,7 @@ import html
 
 import structlog
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters, BotCommand, BotCommandScopeDefault, BotCommandScopeAllGroupChats
 from telegram.constants import ChatAction, ParseMode
 from telegram.ext import (
     Application,
@@ -142,6 +142,54 @@ class TelegramBot:
         except Exception as e:
             logger.warning(f"Could not check admin status: {e}")
             return False
+
+    async def _register_bot_commands(self, application: Application):
+        """Register bot commands in Telegram's menu system."""
+        try:
+            # Define commands for private chats
+            private_commands = [
+                BotCommand("start", "Welcome message and bot introduction"),
+                BotCommand("help", "Show help and usage information"),
+                BotCommand("reset", "Clear conversation history"),
+                BotCommand("stats", "Show your usage statistics"),
+                BotCommand("model", "Switch AI models"),
+            ]
+            
+            # Define commands for group chats (includes all private commands plus group-specific ones)
+            group_commands = [
+                BotCommand("start", "Welcome message and bot introduction"),
+                BotCommand("help", "Show help and usage information"),
+                BotCommand("reset", "Clear conversation history"),
+                BotCommand("stats", "Show your usage statistics"),
+                BotCommand("model", "Switch AI models"),
+                BotCommand("group_mode", "Change group memory mode (admin only)"),
+                BotCommand("group_settings", "View group settings (admin only)"),
+                BotCommand("group_reset", "Reset group conversations (admin only)"),
+                BotCommand("group_stats", "Show group statistics"),
+            ]
+            
+            # Register commands for private chats (default scope)
+            await application.bot.set_my_commands(
+                commands=private_commands,
+                scope=BotCommandScopeDefault()
+            )
+            
+            # Register commands for all group chats
+            await application.bot.set_my_commands(
+                commands=group_commands,
+                scope=BotCommandScopeAllGroupChats()
+            )
+            
+            logger.info(
+                "Bot commands registered successfully",
+                private_commands_count=len(private_commands),
+                group_commands_count=len(group_commands)
+            )
+            
+        except Exception as e:
+            logger.error("Failed to register bot commands", error=str(e))
+            # Don't fail initialization if command registration fails
+            # The bot will still work, just without the menu
 
     async def initialize(self):
         """Initialize the bot and database."""
@@ -981,6 +1029,10 @@ Start chatting to build group stats!
         logger.info("Starting Telegram bot...")
         await application.initialize()
         await application.start()
+        
+        # Register bot commands in Telegram's menu
+        await self._register_bot_commands(application)
+        
         await application.updater.start_polling()
 
         try:
