@@ -12,6 +12,9 @@ A sophisticated Telegram bot powered by Cerebras AI that delivers intelligent co
 - **📊 Usage Analytics**: Track interactions and preferences
 - **🔒 Rate Limited**: Fair usage controls for optimal performance
 - **👍 Smart Reactions**: Bot acknowledges messages with emoji reactions
+- **🏢 Group Support**: Full-featured group chat support with admin controls
+- **🧵 Thread Management**: Support for forum topics and reply chains
+- **⚙️ Configurable**: Flexible group settings and mention policies
 
 ## 🚀 Quick Start
 
@@ -95,6 +98,14 @@ DATABASE_PATH=/app/data/bot_database.db  # For Docker deployment
 LOG_LEVEL=INFO
 RATE_LIMIT_MESSAGES_PER_MINUTE=10
 RATE_LIMIT_WINDOW_SECONDS=60
+
+# Group Features (optional)
+ENABLE_GROUP_FEATURES=true
+DEFAULT_GROUP_MODE=shared
+DEFAULT_GROUP_MENTION_POLICY=mention_only
+GROUP_MAX_CONTEXT=40
+DEFAULT_GROUP_RATE_LIMIT=50
+DEFAULT_USER_RATE_LIMIT_IN_GROUPS=10
 ```
 
 **Note**: For Docker deployment, use `/app/data/bot_database.db` to ensure data persists across container rebuilds.
@@ -106,11 +117,20 @@ RATE_LIMIT_WINDOW_SECONDS=60
 
 ## 🤖 Bot Commands
 
+### Personal Commands
+
 - `/start` - Welcome message and introduction
 - `/help` - Detailed help and usage information
 - `/reset` or `/clear` - Clear conversation history
 - `/stats` - View usage statistics and preferences
 - `/model` - Switch between available AI models
+
+### Group Commands (Admin Only)
+
+- `/group_mode` - Set shared or personal memory mode
+- `/group_settings` - View all group configuration options
+- `/group_reset` - Clear group conversation history
+- `/group_stats` - View group statistics and activity
 
 ## 🏗️ Architecture
 
@@ -145,10 +165,18 @@ The project follows Python best practices:
 
 ## 📊 Database Schema
 
+### Core Tables
+
 - **users**: User profiles and preferences
 - **conversations**: Chat history and context per user
 - **message_reactions**: Bot interaction tracking
-- **rate_limits**: Fair usage enforcement
+- **rate_limits**: Fair usage enforcement with scope support
+
+### Group Tables
+
+- **groups**: Group chat information and metadata
+- **group_settings**: Configurable group behavior and preferences
+- **group_conversations**: Threaded conversation history for groups
 
 ## 🚨 Production Notes
 

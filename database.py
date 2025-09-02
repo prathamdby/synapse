@@ -23,8 +23,9 @@ class DatabaseManager:
         db_dir.mkdir(parents=True, exist_ok=True)
 
         async with aiosqlite.connect(self.db_path) as db:
-            # Check if we need to migrate the users table
+            # Check if we need to migrate the database
             await self._migrate_database(db)
+
             # Users table
             await db.execute(
                 """
@@ -55,6 +56,54 @@ class DatabaseManager:
             """
             )
 
+            # Groups table
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS groups (
+                    chat_id INTEGER PRIMARY KEY,
+                    title TEXT,
+                    type TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """
+            )
+
+            # Group settings table
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS group_settings (
+                    chat_id INTEGER PRIMARY KEY,
+                    mode TEXT DEFAULT 'shared',
+                    mention_policy TEXT DEFAULT 'mention_only',
+                    model TEXT,
+                    max_context_msgs INTEGER DEFAULT 40,
+                    per_user_rate_limit INTEGER DEFAULT 10,
+                    per_group_rate_limit INTEGER DEFAULT 50,
+                    rate_limit_window INTEGER DEFAULT 60,
+                    enable_reactions BOOLEAN DEFAULT 0,
+                    FOREIGN KEY (chat_id) REFERENCES groups (chat_id)
+                )
+            """
+            )
+
+            # Group conversations table
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS group_conversations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id INTEGER,
+                    thread_key TEXT DEFAULT 'default',
+                    conversation_history TEXT,
+                    summary TEXT,
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    message_count INTEGER DEFAULT 0,
+                    FOREIGN KEY (chat_id) REFERENCES groups (chat_id),
+                    UNIQUE(chat_id, thread_key)
+                )
+            """
+            )
+
             # Message reactions table (for bot acknowledgments)
             await db.execute(
                 """
@@ -69,15 +118,28 @@ class DatabaseManager:
             """
             )
 
-            # Rate limiting table
+            # Enhanced rate limiting table with scope support
             await db.execute(
                 """
                 CREATE TABLE IF NOT EXISTS rate_limits (
-                    user_id INTEGER PRIMARY KEY,
+                    scope TEXT NOT NULL,
+                    entity_id INTEGER NOT NULL,
                     message_count INTEGER DEFAULT 0,
-                    window_start TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    window_start TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (scope, entity_id)
                 )
             """
+            )
+
+            # Create indexes for performance
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations (user_id)"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_group_conversations_chat_thread ON group_conversations (chat_id, thread_key)"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_rate_limits_scope_entity ON rate_limits (scope, entity_id)"
             )
 
             await db.commit()
@@ -86,7 +148,7 @@ class DatabaseManager:
     async def _migrate_database(self, db):
         """Handle database migrations."""
         try:
-            # Check if preferred_model column exists
+            # Check if preferred_model column exists in users table
             cursor = await db.execute("PRAGMA table_info(users)")
             columns = await cursor.fetchall()
             column_names = [column[1] for column in columns]
@@ -97,7 +159,48 @@ class DatabaseManager:
                     "ALTER TABLE users ADD COLUMN preferred_model TEXT DEFAULT 'gpt-oss-120b'"
                 )
                 await db.commit()
-                logger.info("Database migration completed successfully")
+
+            # Migrate existing rate_limits table to new schema if needed
+            cursor = await db.execute("PRAGMA table_info(rate_limits)")
+            rate_limit_columns = await cursor.fetchall()
+            rate_limit_column_names = [column[1] for column in rate_limit_columns]
+
+            if "scope" not in rate_limit_column_names:
+                logger.info("Migrating rate_limits table to new schema")
+
+                # Backup existing data
+                cursor = await db.execute(
+                    "SELECT user_id, message_count, window_start FROM rate_limits"
+                )
+                existing_data = await cursor.fetchall()
+
+                # Drop old table
+                await db.execute("DROP TABLE rate_limits")
+
+                # Create new table
+                await db.execute(
+                    """
+                    CREATE TABLE rate_limits (
+                        scope TEXT NOT NULL,
+                        entity_id INTEGER NOT NULL,
+                        message_count INTEGER DEFAULT 0,
+                        window_start TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (scope, entity_id)
+                    )
+                    """
+                )
+
+                # Restore data with 'user' scope
+                for user_id, message_count, window_start in existing_data:
+                    await db.execute(
+                        "INSERT INTO rate_limits (scope, entity_id, message_count, window_start) VALUES (?, ?, ?, ?)",
+                        ("user", user_id, message_count, window_start),
+                    )
+
+                await db.commit()
+                logger.info("Rate limits table migration completed successfully")
+
+            logger.info("Database migration completed successfully")
         except Exception as e:
             logger.error(f"Database migration error: {e}")
             # Continue with initialization even if migration fails
@@ -219,10 +322,26 @@ class DatabaseManager:
         self, user_id: int, max_messages: int, window_seconds: int
     ) -> bool:
         """Check if user is within rate limits."""
+        return await self._check_rate_limit_by_scope(
+            "user", user_id, max_messages, window_seconds
+        )
+
+    async def check_group_rate_limit(
+        self, chat_id: int, max_messages: int, window_seconds: int
+    ) -> bool:
+        """Check if group is within rate limits."""
+        return await self._check_rate_limit_by_scope(
+            "group", chat_id, max_messages, window_seconds
+        )
+
+    async def _check_rate_limit_by_scope(
+        self, scope: str, entity_id: int, max_messages: int, window_seconds: int
+    ) -> bool:
+        """Check rate limits for a given scope and entity."""
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute(
-                "SELECT message_count, window_start FROM rate_limits WHERE user_id = ?",
-                (user_id,),
+                "SELECT message_count, window_start FROM rate_limits WHERE scope = ? AND entity_id = ?",
+                (scope, entity_id),
             )
             result = await cursor.fetchone()
 
@@ -238,16 +357,16 @@ class DatabaseManager:
                     await db.execute(
                         """UPDATE rate_limits 
                            SET message_count = 1, window_start = ? 
-                           WHERE user_id = ?""",
-                        (current_time.isoformat(), user_id),
+                           WHERE scope = ? AND entity_id = ?""",
+                        (current_time.isoformat(), scope, entity_id),
                     )
                     await db.commit()
                     return True
                 elif message_count < max_messages:
                     # Increment counter
                     await db.execute(
-                        "UPDATE rate_limits SET message_count = message_count + 1 WHERE user_id = ?",
-                        (user_id,),
+                        "UPDATE rate_limits SET message_count = message_count + 1 WHERE scope = ? AND entity_id = ?",
+                        (scope, entity_id),
                     )
                     await db.commit()
                     return True
@@ -255,10 +374,10 @@ class DatabaseManager:
                     # Rate limit exceeded
                     return False
             else:
-                # First message from user
+                # First message from entity
                 await db.execute(
-                    "INSERT INTO rate_limits (user_id, message_count, window_start) VALUES (?, 1, ?)",
-                    (user_id, current_time.isoformat()),
+                    "INSERT INTO rate_limits (scope, entity_id, message_count, window_start) VALUES (?, ?, 1, ?)",
+                    (scope, entity_id, current_time.isoformat()),
                 )
                 await db.commit()
                 return True
@@ -305,3 +424,188 @@ class DatabaseManager:
             )
             await db.commit()
             logger.info(f"Updated preferred model for user {user_id} to {model}")
+
+    # Group management methods
+    async def get_or_create_group(
+        self, chat_id: int, title: str = None, chat_type: str = None
+    ) -> Dict[str, Any]:
+        """Get existing group or create new one."""
+        async with aiosqlite.connect(self.db_path) as db:
+            # Check if group exists
+            cursor = await db.execute(
+                "SELECT * FROM groups WHERE chat_id = ?", (chat_id,)
+            )
+            group = await cursor.fetchone()
+
+            if group:
+                # Update last active timestamp
+                await db.execute(
+                    "UPDATE groups SET last_active = CURRENT_TIMESTAMP WHERE chat_id = ?",
+                    (chat_id,),
+                )
+                await db.commit()
+
+                # Convert to dict
+                columns = [desc[0] for desc in cursor.description]
+                return dict(zip(columns, group))
+            else:
+                # Create new group
+                await db.execute(
+                    """INSERT INTO groups (chat_id, title, type) 
+                       VALUES (?, ?, ?)""",
+                    (chat_id, title, chat_type),
+                )
+
+                # Create default group settings
+                await db.execute(
+                    """INSERT INTO group_settings (chat_id, mode, mention_policy, max_context_msgs, per_user_rate_limit, per_group_rate_limit) 
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (chat_id, "shared", "mention_only", 40, 10, 50),
+                )
+                await db.commit()
+
+                # Return the new group
+                cursor = await db.execute(
+                    "SELECT * FROM groups WHERE chat_id = ?", (chat_id,)
+                )
+                group = await cursor.fetchone()
+                columns = [desc[0] for desc in cursor.description]
+                return dict(zip(columns, group))
+
+    async def get_group_settings(self, chat_id: int) -> Dict[str, Any]:
+        """Get group settings."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT * FROM group_settings WHERE chat_id = ?", (chat_id,)
+            )
+            result = await cursor.fetchone()
+
+            if result:
+                columns = [desc[0] for desc in cursor.description]
+                return dict(zip(columns, result))
+            return {}
+
+    async def update_group_setting(self, chat_id: int, setting: str, value: Any):
+        """Update a single group setting."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                f"UPDATE group_settings SET {setting} = ? WHERE chat_id = ?",
+                (value, chat_id),
+            )
+            await db.commit()
+            logger.info(f"Updated group {chat_id} setting {setting} to {value}")
+
+    async def get_group_conversation_history(
+        self, chat_id: int, thread_key: str = "default"
+    ) -> List[Dict[str, Any]]:
+        """Get conversation history for a group thread."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT conversation_history, summary FROM group_conversations WHERE chat_id = ? AND thread_key = ? ORDER BY last_updated DESC LIMIT 1",
+                (chat_id, thread_key),
+            )
+            result = await cursor.fetchone()
+
+            if result and result[0]:
+                try:
+                    history = json.loads(result[0])
+                    summary = result[1]
+                    return {"history": history, "summary": summary}
+                except json.JSONDecodeError:
+                    logger.error(
+                        f"Failed to decode group conversation history for chat {chat_id}, thread {thread_key}"
+                    )
+                    return {"history": [], "summary": None}
+            return {"history": [], "summary": None}
+
+    async def update_group_conversation_history(
+        self,
+        chat_id: int,
+        messages: List[Dict[str, Any]],
+        thread_key: str = "default",
+        summary: str = None,
+    ):
+        """Update conversation history for a group thread."""
+        async with aiosqlite.connect(self.db_path) as db:
+            history_json = json.dumps(messages)
+
+            # Check if conversation exists
+            cursor = await db.execute(
+                "SELECT id FROM group_conversations WHERE chat_id = ? AND thread_key = ?",
+                (chat_id, thread_key),
+            )
+            existing = await cursor.fetchone()
+
+            if existing:
+                # Update existing conversation
+                await db.execute(
+                    """UPDATE group_conversations 
+                       SET conversation_history = ?, summary = ?, last_updated = CURRENT_TIMESTAMP, 
+                           message_count = ? 
+                       WHERE chat_id = ? AND thread_key = ?""",
+                    (history_json, summary, len(messages), chat_id, thread_key),
+                )
+            else:
+                # Create new conversation
+                await db.execute(
+                    """INSERT INTO group_conversations (chat_id, thread_key, conversation_history, summary, message_count) 
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (chat_id, thread_key, history_json, summary, len(messages)),
+                )
+
+            await db.commit()
+
+    async def clear_group_conversation_history(
+        self, chat_id: int, thread_key: str = None
+    ):
+        """Clear conversation history for a group (specific thread or all threads)."""
+        async with aiosqlite.connect(self.db_path) as db:
+            if thread_key:
+                await db.execute(
+                    "DELETE FROM group_conversations WHERE chat_id = ? AND thread_key = ?",
+                    (chat_id, thread_key),
+                )
+                logger.info(
+                    f"Cleared conversation history for group {chat_id}, thread {thread_key}"
+                )
+            else:
+                await db.execute(
+                    "DELETE FROM group_conversations WHERE chat_id = ?", (chat_id,)
+                )
+                logger.info(f"Cleared all conversation history for group {chat_id}")
+            await db.commit()
+
+    async def get_group_stats(self, chat_id: int) -> Dict[str, Any]:
+        """Get statistics for a group."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """SELECT 
+                    g.title, g.type, g.created_at, g.last_active,
+                    COUNT(DISTINCT gc.thread_key) as thread_count,
+                    COALESCE(SUM(gc.message_count), 0) as total_messages
+                FROM groups g
+                LEFT JOIN group_conversations gc ON g.chat_id = gc.chat_id
+                WHERE g.chat_id = ?
+                GROUP BY g.chat_id""",
+                (chat_id,),
+            )
+            result = await cursor.fetchone()
+
+            if result:
+                columns = [desc[0] for desc in cursor.description]
+                return dict(zip(columns, result))
+            return {}
+
+    async def determine_thread_key(self, message) -> str:
+        """Determine the thread key for a message."""
+        # Check if it's a forum topic (message_thread_id exists)
+        if hasattr(message, "message_thread_id") and message.message_thread_id:
+            return f"topic_{message.message_thread_id}"
+
+        # Check if it's a reply to another message
+        if hasattr(message, "reply_to_message") and message.reply_to_message:
+            # For now, use a simple approach - could be enhanced to find root message
+            return f"reply_{message.reply_to_message.message_id}"
+
+        # Default thread
+        return "default"

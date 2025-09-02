@@ -194,6 +194,30 @@ class CerebrasClient:
             # Build dynamic system prompt with user context
             user_context_str = ""
             if user_context:
+                # Build group context if applicable
+                group_context_str = ""
+                if user_context.get("is_group", False):
+                    group_stats = user_context.get("group_stats", {})
+                    summary = user_context.get("conversation_summary")
+
+                    group_context_str = f"""
+
+<group_context>
+- Group Title: {user_context.get('chat_title', 'Unknown')}
+- Group Type: {user_context.get('chat_type', 'Unknown')}
+- Active Threads: {group_stats.get('thread_count', 0)}
+- Total Group Messages: {group_stats.get('total_messages', 0)}
+- Group Created: {group_stats.get('created_at', 'Unknown')}
+- Last Group Activity: {group_stats.get('last_active', 'Unknown')}
+</group_context>"""
+
+                    if summary:
+                        group_context_str += f"""
+
+<conversation_summary>
+Previous conversation summary: {summary}
+</conversation_summary>"""
+
                 user_context_str = f"""
 
 <user_context>
@@ -210,9 +234,10 @@ class CerebrasClient:
 <chat_context>
 - Chat ID: {user_context.get('chat_id', 'Unknown')}
 - Chat Type: {user_context.get('chat_type', 'Unknown')}
+- Is Group Chat: {user_context.get('is_group', False)}
 - Message ID: {user_context.get('message_id', 'Unknown')}
 - Message Date: {user_context.get('message_date', 'Unknown')}
-</chat_context>
+</chat_context>{group_context_str}
 
 <conversation_stats>
 - Total Messages in History: {user_context.get('total_messages', 0)}
@@ -227,6 +252,8 @@ class CerebrasClient:
 - Reference their conversation history when relevant
 - Adapt your tone based on their interaction patterns
 - Be aware of their experience level with the bot (new vs returning user)
+- In group chats, be mindful of the group context and other participants
+- Use conversation summary when available to maintain context
 </personalization_instructions>
 </user_context>"""
 
