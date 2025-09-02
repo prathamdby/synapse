@@ -167,7 +167,7 @@ class CerebrasChat:
 
         except Exception as e:
             logger.error(f"Error in chat_with_history: {e}")
-            return "I apologize, but I encountered an error while processing your message. Please try again."
+            return "Something broke while I was processing that. Try again?"
 
     async def stream_response(
         self,
@@ -192,4 +192,4 @@ class CerebrasChat:
 
         except Exception as e:
             logger.error(f"Error in stream_response: {e}")
-            yield "I apologize, but I encountered an error while processing your message."
+            yield "Well, that didn't work. Something went wrong on my end."

@@ -1,8 +1,8 @@
 """
 Telegram Bot with Cerebras AI integration.
 
-A sophisticated Telegram bot that uses Cerebras AI for intelligent conversations
-with persistent context management and user-specific conversation history.
+A Telegram bot that uses Cerebras AI for conversations with memory that actually works.
+No bullshit, just fast responses and persistent context.
 """
 
 import asyncio
@@ -108,22 +108,26 @@ class TelegramBot:
     ) -> str:
         """Remove bot mentions from message text for cleaner AI processing."""
         message_text = update.message.text or ""
-        
+
         if update.message.entities:
             bot_username = context.bot.username.lower()
             bot_id = context.bot.id
-            
+
             # Remove bot mentions (process in reverse order to maintain offsets)
             for entity in reversed(update.message.entities):
                 if entity.type == "mention":
                     start, end = entity.offset, entity.offset + entity.length
-                    mentioned = message_text[start:end].strip('@').lower()
+                    mentioned = message_text[start:end].strip("@").lower()
                     if mentioned == bot_username:
                         message_text = message_text[:start] + message_text[end:]
-                elif entity.type == "text_mention" and entity.user and entity.user.id == bot_id:
+                elif (
+                    entity.type == "text_mention"
+                    and entity.user
+                    and entity.user.id == bot_id
+                ):
                     start, end = entity.offset, entity.offset + entity.length
                     message_text = message_text[:start] + message_text[end:]
-        
+
         return message_text.strip()
 
     def _should_respond_in_group(
@@ -138,19 +142,25 @@ class TelegramBot:
             bot_username = context.bot.username.lower()
             bot_id = context.bot.id
             message_text = update.message.text or ""
-            
+
             for entity in update.message.entities:
                 if entity.type == "mention":
                     start, end = entity.offset, entity.offset + entity.length
-                    mentioned = message_text[start:end].strip('@').lower()
+                    mentioned = message_text[start:end].strip("@").lower()
                     if mentioned == bot_username:
                         return True
-                elif entity.type == "text_mention" and entity.user and entity.user.id == bot_id:
+                elif (
+                    entity.type == "text_mention"
+                    and entity.user
+                    and entity.user.id == bot_id
+                ):
                     return True
 
         # Check if it's a reply to the bot
-        if (update.message.reply_to_message 
-            and update.message.reply_to_message.from_user.id == context.bot.id):
+        if (
+            update.message.reply_to_message
+            and update.message.reply_to_message.from_user.id == context.bot.id
+        ):
             return True
 
         return False
@@ -185,31 +195,28 @@ class TelegramBot:
         )
 
         welcome_message = """
-🤖 <b>Welcome to the Cerebras AI Bot!</b>
+Hey there! 👋
 
-I'm powered by <i>Cerebras AI</i> and I'm here to help you with questions, conversations, and more!
+So you've found your way to me... cool. I'm running on Cerebras AI (which is honestly pretty fast), and I'm here to chat about whatever's on your mind.
 
-<b>Available Commands:</b>
-• <code>/start</code> - Show this welcome message
-• <code>/help</code> - Get detailed help information
-• <code>/reset</code> or <code>/clear</code> - Clear your conversation history
-• <code>/stats</code> - View your usage statistics
-• <code>/model</code> - Switch between available AI models
+<b>Quick commands if you need them:</b>
+• <code>/help</code> - More detailed stuff
+• <code>/reset</code> - Wipe our chat history clean  
+• <code>/stats</code> - See how much you've been talking to me
+• <code>/model</code> - Switch AI models (if you're into that)
 
-Just send me any message and I'll respond using advanced AI! I remember our conversation history, so feel free to reference previous topics.
+Here's the deal - just message me normally and I'll respond. I remember everything we talk about, so you can reference stuff from way back if you want.
 
-<b>Features:</b>
-✨ <u>Intelligent conversations</u> with context
-💾 <u>Persistent conversation memory</u>
-⚡ <u>Fast responses</u> powered by Cerebras
-👍 <u>Message acknowledgment</u> with reactions
-🔒 <u>Private conversations</u> (each user has their own context)
-👥 <u>Group support</u> with shared or personal memory modes
+<b>What I'm good at:</b>
+• Actually remembering context (not like those goldfish chatbots)
+• Being fast as hell thanks to Cerebras
+• Not judging you for weird questions
+• Working in groups too if you want to add me
 
-<b>Group Features:</b>
-Add me to groups for collaborative AI conversations! Group admins can use commands like <code>/group_mode</code>, <code>/group_settings</code>, and <code>/group_reset</code> to customize the experience.
+<b>Groups?</b>
+Yeah, add me to group chats. Admins can mess with settings using commands like <code>/group_mode</code> and <code>/group_settings</code>.
 
-Let's start chatting! 🚀
+Anyway... what's up? 🤷‍♂️
         """
 
         await update.message.reply_text(
@@ -224,79 +231,66 @@ Let's start chatting! 🚀
 
         if is_group:
             help_message = f"""
-🆘 <b>Help &amp; Commands</b>
+<b>Commands &amp; stuff</b>
 
-<b>Basic Commands:</b>
-• <code>/start</code> - Welcome message and bot introduction
-• <code>/help</code> - This help message
-• <code>/reset</code> or <code>/clear</code> - Clear your conversation history
-• <code>/stats</code> - View your usage statistics
-• <code>/model</code> - Switch between available AI models
+<b>Basic ones everyone can use:</b>
+• <code>/help</code> - You're looking at it
+• <code>/reset</code> - Wipe our chat clean
+• <code>/stats</code> - See how chatty you've been
+• <code>/model</code> - Switch AI models
 
-<b>Group Commands (Admin Only):</b>
-• <code>/group_mode</code> - Set shared or personal memory mode
-• <code>/group_settings</code> - View all group settings
-• <code>/group_reset</code> - Clear group conversation history
-• <code>/group_stats</code> - View group statistics
+<b>Admin commands (if you're in charge):</b>
+• <code>/group_mode</code> - Shared memory vs personal memory
+• <code>/group_settings</code> - All the settings
+• <code>/group_reset</code> - Nuclear option for chat history
+• <code>/group_stats</code> - Group activity breakdown
 
-                <b>How to Use in Groups:</b>
-1. <b>Start a conversation:</b> Mention me (@{context.bot.username}) anywhere in your message
-2. <b>Continue chatting:</b> Reply to my messages or mention me again
-3. <b>Case-insensitive:</b> @{context.bot.username}, @{context.bot.username.upper()}, or @{context.bot.username.lower()} all work
-4. Memory mode determines if I remember conversations per group or per user
-5. Admins can configure group behavior with the commands above
+<b>How this works in groups:</b>
+Just mention me (@{context.bot.username}) in your message and I'll jump in. Doesn't matter if it's @{context.bot.username}, @{context.bot.username.upper()}, or whatever.
 
-<b>Group Features:</b>
-• <u>Shared Memory</u>: Bot remembers conversations for the whole group
-• <u>Personal Memory</u>: Bot remembers conversations per user individually  
-• <u>Thread Support</u>: Works with forum topics and reply chains
-• <u>Admin Controls</u>: Group admins can configure bot behavior
-• <u>Rate Limiting</u>: Both per-user and per-group limits
+You can reply to my messages or just mention me again to keep the conversation going.
 
-<b>Rate Limits:</b>
-• Maximum <i>{self.rate_limit_messages}</i> messages per user per <i>{self.rate_limit_window}</i> seconds
-• Group-specific limits configurable by admins
-• Limits reset automatically
+<b>Memory modes:</b>
+• <u>Shared</u>: I remember everything for the whole group
+• <u>Personal</u>: I track conversations per person
 
-Need more help? Just mention me and ask! 💬
+<b>Rate limits:</b>
+Max {self.rate_limit_messages} messages per person every {self.rate_limit_window} seconds. Admins can tweak group limits.
+
+Questions? Just mention me and ask 🤷‍♂️
             """
         else:
             help_message = f"""
-🆘 <b>Help &amp; Commands</b>
+<b>Commands &amp; how this works</b>
 
-<b>Basic Commands:</b>
-• <code>/start</code> - Welcome message and bot introduction
-• <code>/help</code> - This help message
-• <code>/reset</code> or <code>/clear</code> - Clear your conversation history
-• <code>/stats</code> - View your usage statistics
-• <code>/model</code> - Switch between available AI models
+<b>Commands:</b>
+• <code>/start</code> - The welcome thing
+• <code>/help</code> - This message
+• <code>/reset</code> - Forget everything we've talked about
+• <code>/stats</code> - See your usage stats
+• <code>/model</code> - Switch AI models
 
-<b>How to Use:</b>
-1. Just send me any text message
-2. I'll respond with AI-generated content
-3. I remember our conversation, so you can reference previous messages
-4. I'll react to your messages with 👍 as acknowledgment
+<b>How to use me:</b>
+Just... talk to me? Like, send a message and I'll respond. That's it.
 
-<b>Features:</b>
-• <u>Context Awareness</u>: I remember our entire conversation
-• <u>Fast Responses</u>: Powered by Cerebras AI infrastructure
-• <u>Rate Limiting</u>: Fair usage limits to ensure good service for everyone
-• <u>Message Acknowledgment</u>: I react to your messages to show I'm processing
-• <u>Privacy</u>: Your conversations are private and isolated
-• <u>Group Support</u>: Add me to groups for shared AI conversations
+I remember our entire conversation, so you can reference stuff from ages ago if you want. I'll usually react with 👍 to show I got your message.
 
-<b>Tips:</b>
-• Be specific in your questions for better responses
-• You can ask follow-up questions referencing previous topics
-• Use <code>/reset</code> or <code>/clear</code> if you want to start a fresh conversation
-• Check <code>/stats</code> to see your usage patterns
-• Add me to groups for collaborative AI conversations!
+<b>What I can do:</b>
+• Remember context (actually remember, not pretend to)
+• Respond stupid fast (Cerebras is legit)
+• Handle weird questions without judgment
+• Work in groups if you add me there
 
-<b>Rate Limits:</b>
-• Maximum <i>{self.rate_limit_messages}</i> messages per <i>{self.rate_limit_window}</i> seconds
-• Limits reset automatically
+<b>Tips I guess:</b>
+• Be specific if you want better answers
+• Reference old topics - I'll remember
+• Use <code>/reset</code> if you want a fresh start
+• Check <code>/stats</code> to see how much you've been chatting
 
-Need more help? Just ask me anything! 💬
+<b>Rate limits:</b>
+Max {self.rate_limit_messages} messages every {self.rate_limit_window} seconds. Don't spam and we're good.
+
+Got questions? Just ask 🤷‍♂️
             """
 
         await update.message.reply_text(
@@ -311,9 +305,9 @@ Need more help? Just ask me anything! 💬
         await self.db.clear_conversation_history(user_id)
 
         await update.message.reply_text(
-            "🔄 <b>Conversation Reset</b>\n\n"
-            "Your conversation history has been cleared. "
-            "We can start fresh! What would you like to talk about?",
+            "🔄 <b>Memory wiped</b>\n\n"
+            "Your chat history is gone. Clean slate. "
+            "What's on your mind?",
             parse_mode=ParseMode.HTML,
             reply_parameters=ReplyParameters(message_id=update.message.message_id),
         )
@@ -326,31 +320,31 @@ Need more help? Just ask me anything! 💬
 
         if stats:
             stats_message = f"""
-📊 <b>Your Statistics</b>
+📊 <b>Your stats</b>
 
-<b>User Info:</b>
+<b>Who you are:</b>
 • Username: <code>@{html.escape(str(stats.get('username', 'N/A')))}</code>
 • Name: <i>{html.escape(str(stats.get('first_name', 'N/A')))}</i>
 • Joined: <u>{stats.get('created_at', 'N/A')[:10]}</u>
-• Last Active: <u>{stats.get('last_active', 'N/A')[:10]}</u>
+• Last seen: <u>{stats.get('last_active', 'N/A')[:10]}</u>
 
-<b>AI Configuration:</b>
-• Current Model: <code>{preferred_model}</code>
+<b>Current setup:</b>
+• Model: <code>{preferred_model}</code>
 
-<b>Usage:</b>
-• Total Messages: <b>{stats.get('total_messages', 0)}</b>
-• Bot Reactions: <b>{stats.get('reaction_count', 0)}</b>
+<b>How much you talk to me:</b>
+• Messages sent: <b>{stats.get('total_messages', 0)}</b>
+• Times I reacted: <b>{stats.get('reaction_count', 0)}</b>
 
-Keep chatting to see these numbers grow! 📈
+Keep chatting and watch these numbers go up 📈
             """
         else:
             stats_message = f"""
-📊 <b>No statistics available yet.</b> 
+📊 <b>No stats yet</b> 
 
-<b>AI Configuration:</b>
-• Current Model: <code>{preferred_model}</code>
+<b>Current setup:</b>
+• Model: <code>{preferred_model}</code>
 
-Start chatting to build your stats!
+Start chatting and I'll track some numbers for you.
             """
 
         await update.message.reply_text(
@@ -369,7 +363,7 @@ Start chatting to build your stats!
 
             if not available_models:
                 await update.message.reply_text(
-                    "🚫 <b>No Models Available</b>\n\nSorry, no models are currently available. Please try again later.",
+                    "🚫 <b>No Models Available</b>\n\nWell, that's weird. No models are showing up right now. Try again in a bit?",
                     parse_mode=ParseMode.HTML,
                     reply_parameters=ReplyParameters(
                         message_id=update.message.message_id
@@ -418,9 +412,9 @@ Choose a different model to switch your AI experience:
 
 <b>Legend:</b>
 • ✅ Currently selected model
-• 🧠 Supports advanced reasoning features
+• 🧠 Has reasoning features (the fancy stuff)
 
-<i>Note: Your conversation history will be preserved when switching models.</i>
+<i>Don't worry - switching models won't delete our chat history.</i>
             """
 
             await update.message.reply_text(
@@ -433,7 +427,7 @@ Choose a different model to switch your AI experience:
         except Exception as e:
             logger.error(f"Error in model_command: {e}")
             await update.message.reply_text(
-                "🚫 <b>Error</b>\n\nSorry, I couldn't fetch the available models. Please try again later.",
+                "🚫 <b>Error</b>\n\nCouldn't grab the model list. Something's acting up. Try again?",
                 parse_mode=ParseMode.HTML,
                 reply_parameters=ReplyParameters(message_id=update.message.message_id),
             )
@@ -458,13 +452,11 @@ Choose a different model to switch your AI experience:
 
             # Edit the message to show successful selection
             success_message = f"""
-🤖 <b>Model Updated Successfully!</b>
+🤖 <b>Model switched!</b>
 
-<b>New Model:</b> <code>{selected_model}</code>
+<b>Now using:</b> <code>{selected_model}</code>
 
-Your AI experience has been updated. All future conversations will use this model.
-
-<i>Your conversation history has been preserved.</i>
+Your chat history's still there, just running on a different brain now.
             """
 
             await query.edit_message_text(success_message, parse_mode=ParseMode.HTML)
@@ -474,7 +466,7 @@ Your AI experience has been updated. All future conversations will use this mode
         except Exception as e:
             logger.error(f"Error in model_callback: {e}")
             await query.edit_message_text(
-                "🚫 <b>Error</b>\n\nSorry, there was an error updating your model preference. Please try again.",
+                "🚫 <b>Error</b>\n\nThat didn't work. Something went wrong updating your model. Give it another shot?",
                 parse_mode=ParseMode.HTML,
             )
 
@@ -507,7 +499,7 @@ Your AI experience has been updated. All future conversations will use this mode
             if group_settings.get("mention_policy", "mention_only") == "mention_only":
                 if not self._should_respond_in_group(update, context):
                     return  # Don't respond if not mentioned
-                
+
                 # Clean the mention from the message text for better AI processing
                 message_text = self._clean_mention_from_message(update, context)
 
@@ -542,7 +534,7 @@ Your AI experience has been updated. All future conversations will use this mode
         ):
             await update.message.reply_text(
                 f"⏳ <b>Rate limit exceeded</b>\n\n"
-                f"Please wait before sending another message. "
+                f"Slow down there, speed racer. "
                 f"Limit: <i>{user_rate_limit}</i> messages per <i>{self.rate_limit_window}</i> seconds.",
                 parse_mode=ParseMode.HTML,
                 reply_parameters=ReplyParameters(message_id=update.message.message_id),
@@ -628,17 +620,17 @@ Your AI experience has been updated. All future conversations will use this mode
 
             # Check if this is the first interaction in a group conversation
             is_first_group_interaction = (
-                is_group and 
-                len(conversation_history) == 0 and 
-                self._should_respond_in_group(update, context)
+                is_group
+                and len(conversation_history) == 0
+                and self._should_respond_in_group(update, context)
             )
-            
-            # Add a friendly greeting for first-time group mentions
+
+            # Add casual greeting for first-time group mentions
             if is_first_group_interaction:
                 greeting_context = (
-                    f"This is the first time {user.first_name or user.username or 'someone'} "
-                    f"has mentioned you in this group '{chat.title or 'chat'}'. "
-                    f"Respond warmly and let them know you're ready to help with their question: {message_text}"
+                    f"Hey, this is the first time {user.first_name or user.username or 'someone'} "
+                    f"has mentioned you in '{chat.title or 'this chat'}'. "
+                    f"Jump in naturally and respond to their message: {message_text}"
                 )
                 actual_message = f"{greeting_context}\n\nUser's message: {message_text}"
             else:
@@ -711,7 +703,7 @@ Your AI experience has been updated. All future conversations will use this mode
             )
             if not response_sent:
                 await update.message.reply_text(
-                    "🚫 <b>Error</b>\n\nSorry, I encountered an error processing your message. Please try again in a moment.",
+                    "🚫 <b>Error</b>\n\nWell, that's embarrassing. Something broke on my end. Give it another try?",
                     parse_mode=ParseMode.HTML,
                     reply_parameters=ReplyParameters(
                         message_id=update.message.message_id
@@ -879,9 +871,9 @@ Use the commands below to modify settings:
         )
 
         await update.message.reply_text(
-            "🔄 <b>Group Conversations Reset</b>\n\n"
-            "All group conversation history has been cleared. "
-            "We can start fresh! What would you like to talk about?",
+            "🔄 <b>Group memory wiped</b>\n\n"
+            "All the group chat history is gone. Fresh start. "
+            "What's up?",
             parse_mode=ParseMode.HTML,
             reply_parameters=ReplyParameters(message_id=update.message.message_id),
         )
@@ -958,12 +950,17 @@ Start chatting to build group stats!
                     user_id=update.effective_user.id,
                 )
 
+                mode_description = (
+                    "I'll remember stuff for the whole group now."
+                    if mode == "shared"
+                    else "I'll track conversations per person now."
+                )
                 success_message = f"""
-🔧 <b>Group Mode Updated!</b>
+🔧 <b>Group mode switched!</b>
 
-<b>New Mode:</b> <code>{mode}</code>
+<b>Now using:</b> <code>{mode}</code>
 
-{'The bot will now remember conversations for the whole group.' if mode == 'shared' else 'The bot will now remember conversations per user individually.'}
+{mode_description}
                 """
 
                 await query.edit_message_text(
@@ -973,7 +970,7 @@ Start chatting to build group stats!
         except Exception as e:
             logger.error(f"Error in group_callback: {e}")
             await query.edit_message_text(
-                "🚫 <b>Error</b>\n\nSorry, there was an error updating the group settings. Please try again.",
+                "🚫 <b>Error</b>\n\nThat didn't work. Something went wrong with the group settings. Try again?",
                 parse_mode=ParseMode.HTML,
             )
 
