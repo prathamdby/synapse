@@ -345,7 +345,6 @@ When working on specific parts of the Synapse codebase, you must adhere to these
   ```
 
 - **Response Verification Layer:** Implement manager-style verification for critical responses:
-
   - Verify HTML compliance before sending
   - Check character count against Telegram limits
   - Validate that response addresses user's actual request
