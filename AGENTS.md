@@ -372,6 +372,12 @@ When working on specific parts of the Synapse codebase, you must adhere to these
   - Provide clear, actionable error messages.
 - **Dynamic Keyboards:** Generate `InlineKeyboardMarkup` dynamically. Handle callback queries by first calling `await query.answer()` and wrapping the logic in a `try...except` block.
 - **Character Escaping:** Use `html.escape()` for any user-generated content that will be displayed in a reply to prevent malformed HTML.
+- **Slash Command Registration:** **Always** register bot commands using `bot.set_my_commands()` during initialization:
+  - Create `BotCommand` objects with clear, descriptive descriptions (1-256 characters).
+  - Use appropriate command scopes: `BotCommandScopeDefault()` for private chats, `BotCommandScopeAllGroupChats()` for groups.
+  - Register commands after application start but before polling begins.
+  - Handle registration failures gracefully - bot should continue working even if command registration fails.
+  - Differentiate command sets between private and group chats based on functionality relevance.
 
 ### Advanced Bot Response Planning
 
