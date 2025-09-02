@@ -15,7 +15,7 @@ import html
 
 import structlog
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters
 from telegram.constants import ChatAction, ParseMode
 from telegram.ext import (
     Application,
@@ -125,7 +125,11 @@ Just send me any message and I'll respond using advanced AI! I remember our conv
 Let's start chatting! 🚀
         """
 
-        await update.message.reply_text(welcome_message, parse_mode=ParseMode.HTML)
+        await update.message.reply_text(
+            welcome_message,
+            parse_mode=ParseMode.HTML,
+            reply_parameters=ReplyParameters(message_id=update.message.message_id),
+        )
 
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /help command."""
@@ -165,7 +169,11 @@ Let's start chatting! 🚀
 Need more help? Just ask me anything! 💬
         """
 
-        await update.message.reply_text(help_message, parse_mode=ParseMode.HTML)
+        await update.message.reply_text(
+            help_message,
+            parse_mode=ParseMode.HTML,
+            reply_parameters=ReplyParameters(message_id=update.message.message_id),
+        )
 
     async def reset_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /reset and /clear commands."""
@@ -177,6 +185,7 @@ Need more help? Just ask me anything! 💬
             "Your conversation history has been cleared. "
             "We can start fresh! What would you like to talk about?",
             parse_mode=ParseMode.HTML,
+            reply_parameters=ReplyParameters(message_id=update.message.message_id),
         )
 
     async def stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -214,7 +223,11 @@ Keep chatting to see these numbers grow! 📈
 Start chatting to build your stats!
             """
 
-        await update.message.reply_text(stats_message, parse_mode=ParseMode.HTML)
+        await update.message.reply_text(
+            stats_message,
+            parse_mode=ParseMode.HTML,
+            reply_parameters=ReplyParameters(message_id=update.message.message_id),
+        )
 
     async def model_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /model command to display available models."""
@@ -228,6 +241,9 @@ Start chatting to build your stats!
                 await update.message.reply_text(
                     "🚫 <b>No Models Available</b>\n\nSorry, no models are currently available. Please try again later.",
                     parse_mode=ParseMode.HTML,
+                    reply_parameters=ReplyParameters(
+                        message_id=update.message.message_id
+                    ),
                 )
                 return
 
@@ -278,7 +294,10 @@ Choose a different model to switch your AI experience:
             """
 
             await update.message.reply_text(
-                model_message, parse_mode=ParseMode.HTML, reply_markup=reply_markup
+                model_message,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup,
+                reply_parameters=ReplyParameters(message_id=update.message.message_id),
             )
 
         except Exception as e:
@@ -286,6 +305,7 @@ Choose a different model to switch your AI experience:
             await update.message.reply_text(
                 "🚫 <b>Error</b>\n\nSorry, I couldn't fetch the available models. Please try again later.",
                 parse_mode=ParseMode.HTML,
+                reply_parameters=ReplyParameters(message_id=update.message.message_id),
             )
 
     async def model_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -343,6 +363,7 @@ Your AI experience has been updated. All future conversations will use this mode
                 f"Please wait before sending another message. "
                 f"Limit: <i>{self.rate_limit_messages}</i> messages per <i>{self.rate_limit_window}</i> seconds.",
                 parse_mode=ParseMode.HTML,
+                reply_parameters=ReplyParameters(message_id=update.message.message_id),
             )
             return
 
@@ -427,7 +448,9 @@ Your AI experience has been updated. All future conversations will use this mode
             # Sanitize HTML response to prevent parsing errors
             sanitized_response = self._sanitize_html_response(response)
             await update.message.reply_text(
-                sanitized_response, parse_mode=ParseMode.HTML
+                sanitized_response,
+                parse_mode=ParseMode.HTML,
+                reply_parameters=ReplyParameters(message_id=update.message.message_id),
             )
             response_sent = True
 
@@ -439,6 +462,9 @@ Your AI experience has been updated. All future conversations will use this mode
                 await update.message.reply_text(
                     "🚫 <b>Error</b>\n\nSorry, I encountered an error processing your message. Please try again in a moment.",
                     parse_mode=ParseMode.HTML,
+                    reply_parameters=ReplyParameters(
+                        message_id=update.message.message_id
+                    ),
                 )
         finally:
             # Stop typing indicator
