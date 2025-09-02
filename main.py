@@ -103,33 +103,6 @@ class TelegramBot:
 
         return response.strip()
 
-    def _clean_mention_from_message(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
-    ) -> str:
-        """Remove bot mentions from message text for cleaner AI processing."""
-        message_text = update.message.text or ""
-
-        if update.message.entities:
-            bot_username = context.bot.username.lower()
-            bot_id = context.bot.id
-
-            # Remove bot mentions (process in reverse order to maintain offsets)
-            for entity in reversed(update.message.entities):
-                if entity.type == "mention":
-                    start, end = entity.offset, entity.offset + entity.length
-                    mentioned = message_text[start:end].strip("@").lower()
-                    if mentioned == bot_username:
-                        message_text = message_text[:start] + message_text[end:]
-                elif (
-                    entity.type == "text_mention"
-                    and entity.user
-                    and entity.user.id == bot_id
-                ):
-                    start, end = entity.offset, entity.offset + entity.length
-                    message_text = message_text[:start] + message_text[end:]
-
-        return message_text.strip()
-
     def _should_respond_in_group(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> bool:
@@ -137,24 +110,12 @@ class TelegramBot:
         if update.effective_chat.type == "private":
             return True
 
-        # Check message entities for mentions (most reliable method)
-        if update.message.entities:
-            bot_username = context.bot.username.lower()
-            bot_id = context.bot.id
-            message_text = update.message.text or ""
+        message_text = update.message.text or ""
+        bot_username = context.bot.username
 
-            for entity in update.message.entities:
-                if entity.type == "mention":
-                    start, end = entity.offset, entity.offset + entity.length
-                    mentioned = message_text[start:end].strip("@").lower()
-                    if mentioned == bot_username:
-                        return True
-                elif (
-                    entity.type == "text_mention"
-                    and entity.user
-                    and entity.user.id == bot_id
-                ):
-                    return True
+        # Check if message starts with @bot_username
+        if message_text.startswith(f"@{bot_username}"):
+            return True
 
         # Check if it's a reply to the bot
         if (
@@ -500,8 +461,10 @@ Your chat history's still there, just running on a different brain now.
                 if not self._should_respond_in_group(update, context):
                     return  # Don't respond if not mentioned
 
-                # Clean the mention from the message text for better AI processing
-                message_text = self._clean_mention_from_message(update, context)
+                # Remove @bot_username from start of message if present
+                bot_username = context.bot.username
+                if message_text.startswith(f"@{bot_username}"):
+                    message_text = message_text[len(f"@{bot_username}") :].strip()
 
             # Check group rate limiting first
             group_rate_limit = group_settings.get("per_group_rate_limit", 50)
