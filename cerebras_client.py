@@ -320,14 +320,21 @@ AVOID (excessive formatting):
 
 <html_compliance_protocol>
 <step_1_allowed_tags>
-You can ONLY use these exact 7 tags when HTML is truly needed:
-1. <b>text</b> - for important headings or key concepts only
-2. <i>text</i> - for emphasis or foreign terms
-3. <u>text</u> - rarely, for special emphasis
-4. <s>text</s> - rarely, for corrections
+Core formatting tags (use sparingly, only when needed):
+1. <b>text</b> or <strong>text</strong> - for important headings or key concepts only
+2. <i>text</i> or <em>text</em> - for emphasis or foreign terms
+3. <u>text</u> or <ins>text</ins> - rarely, for special emphasis
+4. <s>text</s> or <strike>text</strike> or <del>text</del> - rarely, for corrections
 5. <code>text</code> - only for code, commands, or technical terms
 6. <pre>text</pre> - only for multi-line code blocks
-7. <a href="url">text</a> - for useful links only
+7. <pre><code class="language-python">code</code></pre> - for syntax-highlighted code
+8. <a href="url">text</a> - for useful links only
+
+Advanced tags (use very sparingly):
+9. <blockquote>text</blockquote> - for quotes or important notes
+10. <blockquote expandable>text</blockquote> - for longer collapsible quotes
+11. <span class="tg-spoiler">text</span> or <tg-spoiler>text</tg-spoiler> - for spoiler text
+12. <tg-emoji emoji-id="id">🔥</tg-emoji> - for custom emojis (premium feature)
 </step_1_allowed_tags>
 
 <step_2_forbidden_examples>
@@ -336,12 +343,13 @@ NEVER generate these (system will crash):
 - < > (empty tags with spaces)
 - <vec> or <string> or <anything_custom>
 - <h1> or <h2> or any heading tags
-- <ul> or <ol> or <li> or any list tags
-- <div> or <span> or <p> or any container tags
-- <br> or <hr> or any break tags
+- <ul> or <ol> or <li> or any list tags (use bullet points • instead)
+- <div> or <p> or <span> (except <span class="tg-spoiler">) or any container tags
+- <br> or <hr> or any break tags (use actual newlines \n instead)
 - Any tag with < inside like <vec<string>
 - Any unclosed tags like <b>text
 - Any malformed tags like text</b> without opening
+- Markdown syntax like **bold** or `code` (use HTML tags instead)
 </step_2_forbidden_examples>
 
 <step_3_character_rules>
@@ -349,7 +357,10 @@ For special characters, you MUST:
 - Write & as &amp;
 - Write < as &lt; (except in allowed HTML tags)
 - Write > as &gt; (except in allowed HTML tags)
-- Write " as &quot; in attributes
+- Write " as &quot; in attributes (e.g., href="...")
+- Use telegram.helpers.escape_html() for user-generated content
+- Numerical HTML entities work fine: &#8364; for €
+- Only 4 named entities supported: &lt; &gt; &amp; &quot;
 </step_3_character_rules>
 
 <step_4_list_format>
@@ -365,25 +376,38 @@ NEVER use <ul><li>Item</li></ul> format.
 <preferred_examples>
 Example 1 (minimal formatting): "Python is a programming language that focuses on readability and simplicity. To get started, install it from python.org."
 
-Example 2 (appropriate code formatting): "Here's a simple example:
-<pre>
+Example 2 (syntax-highlighted code): "Here's a simple example:
+<pre><code class="language-python">
 def greet(name):
     print(f\"Hello, {{name}}!\")
-</pre>"
+</code></pre>"
 
 Example 3 (balanced list): "<b>Getting Started:</b>
 • Download Python from the official website
 • Run the installer with default settings
 • Test with <code>python --version</code>"
+
+Example 4 (advanced formatting): "<b>Important Note:</b>
+
+<blockquote expandable>
+<i>Detailed Information:</i>
+
+This is a longer explanation that can be collapsed by default. Users can click to expand and see the full content. Use this for documentation or detailed explanations.
+</blockquote>
+
+For sensitive information: <span class=\"tg-spoiler\">Hidden content here</span>"
 </preferred_examples>
 
 <avoid_examples>
 ❌ Excessive formatting: "<b>Python</b> is a <i>programming language</i> that focuses on <u>readability</u> and <b>simplicity</b>."
 ❌ HTML tags: <h1>Heading</h1>
 ❌ List tags: <ul><li>Item</li></ul>
+❌ Line breaks: Line 1<br>Line 2 (use actual newlines instead)
 ❌ Custom tags: <vec<string>>
 ❌ Empty tags: <> or < >
 ❌ Markdown: **bold** or `code`
+❌ Wrong code blocks: <pre><b>This won't work</b></pre>
+❌ Missing language class: <pre><code>code</code></pre> (should specify language)
 </avoid_examples>
 </step_5_examples>
 </html_compliance_protocol>
@@ -391,11 +415,15 @@ Example 3 (balanced list): "<b>Getting Started:</b>
 <mandatory_verification>
 Before generating ANY response, you MUST ask yourself:
 <verification_question_1>Am I using HTML formatting sparingly and only where it adds value?</verification_question_1>
-<verification_question_2>Are all my tags from the allowed list of 7?</verification_question_2>
+<verification_question_2>Are all my tags from the allowed list (core + advanced tags)?</verification_question_2>
 <verification_question_3>Do I have any empty tags like <> or < >?</verification_question_3>
 <verification_question_4>Do I have any custom tags like <vec> or <string>?</verification_question_4>
-<verification_question_5>Are all my tags properly closed?</verification_question_5>
+<verification_question_5>Are all my tags properly closed and nested correctly?</verification_question_5>
 <verification_question_6>Am I using bullet points (•) instead of <li> tags?</verification_question_6>
+<verification_question_7>Am I using actual newlines (\n) instead of <br> tags?</verification_question_7>
+<verification_question_8>For code blocks, am I using language classes for syntax highlighting?</verification_question_8>
+<verification_question_9>Have I escaped user input with telegram.helpers.escape_html()?</verification_question_9>
+<verification_question_10>Is my message under 4096 characters including HTML tags?</verification_question_10>
 
 If ANY answer is wrong, you MUST fix it before responding.
 </mandatory_verification>
