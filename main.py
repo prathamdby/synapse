@@ -103,6 +103,29 @@ class TelegramBot:
 
         return response.strip()
 
+    def _clean_mention_from_message(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> str:
+        """Remove bot mentions from message text for cleaner AI processing."""
+        message_text = update.message.text or ""
+        
+        if update.message.entities:
+            bot_username = context.bot.username.lower()
+            bot_id = context.bot.id
+            
+            # Remove bot mentions (process in reverse order to maintain offsets)
+            for entity in reversed(update.message.entities):
+                if entity.type == "mention":
+                    start, end = entity.offset, entity.offset + entity.length
+                    mentioned = message_text[start:end].strip('@').lower()
+                    if mentioned == bot_username:
+                        message_text = message_text[:start] + message_text[end:]
+                elif entity.type == "text_mention" and entity.user and entity.user.id == bot_id:
+                    start, end = entity.offset, entity.offset + entity.length
+                    message_text = message_text[:start] + message_text[end:]
+        
+        return message_text.strip()
+
     def _should_respond_in_group(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> bool:
@@ -110,19 +133,24 @@ class TelegramBot:
         if update.effective_chat.type == "private":
             return True
 
-        # Check if bot is mentioned
-        bot_username = context.bot.username
-        message_text = update.message.text or ""
-
-        # Check for @mention
-        if f"@{bot_username}" in message_text:
-            return True
+        # Check message entities for mentions (most reliable method)
+        if update.message.entities:
+            bot_username = context.bot.username.lower()
+            bot_id = context.bot.id
+            message_text = update.message.text or ""
+            
+            for entity in update.message.entities:
+                if entity.type == "mention":
+                    start, end = entity.offset, entity.offset + entity.length
+                    mentioned = message_text[start:end].strip('@').lower()
+                    if mentioned == bot_username:
+                        return True
+                elif entity.type == "text_mention" and entity.user and entity.user.id == bot_id:
+                    return True
 
         # Check if it's a reply to the bot
-        if (
-            update.message.reply_to_message
-            and update.message.reply_to_message.from_user.id == context.bot.id
-        ):
+        if (update.message.reply_to_message 
+            and update.message.reply_to_message.from_user.id == context.bot.id):
             return True
 
         return False
@@ -211,11 +239,12 @@ Let's start chatting! 🚀
 • <code>/group_reset</code> - Clear group conversation history
 • <code>/group_stats</code> - View group statistics
 
-<b>How to Use in Groups:</b>
-1. Mention me (@{context.bot.username}) or reply to my messages
-2. I'll respond with AI-generated content
-3. Memory mode determines if I remember conversations per group or per user
-4. Admins can configure group behavior with the commands above
+                <b>How to Use in Groups:</b>
+1. <b>Start a conversation:</b> Mention me (@{context.bot.username}) anywhere in your message
+2. <b>Continue chatting:</b> Reply to my messages or mention me again
+3. <b>Case-insensitive:</b> @{context.bot.username}, @{context.bot.username.upper()}, or @{context.bot.username.lower()} all work
+4. Memory mode determines if I remember conversations per group or per user
+5. Admins can configure group behavior with the commands above
 
 <b>Group Features:</b>
 • <u>Shared Memory</u>: Bot remembers conversations for the whole group
@@ -478,6 +507,9 @@ Your AI experience has been updated. All future conversations will use this mode
             if group_settings.get("mention_policy", "mention_only") == "mention_only":
                 if not self._should_respond_in_group(update, context):
                     return  # Don't respond if not mentioned
+                
+                # Clean the mention from the message text for better AI processing
+                message_text = self._clean_mention_from_message(update, context)
 
             # Check group rate limiting first
             group_rate_limit = group_settings.get("per_group_rate_limit", 50)
@@ -594,9 +626,27 @@ Your AI experience has been updated. All future conversations will use this mode
                 "has_username": user.username is not None,
             }
 
+            # Check if this is the first interaction in a group conversation
+            is_first_group_interaction = (
+                is_group and 
+                len(conversation_history) == 0 and 
+                self._should_respond_in_group(update, context)
+            )
+            
+            # Add a friendly greeting for first-time group mentions
+            if is_first_group_interaction:
+                greeting_context = (
+                    f"This is the first time {user.first_name or user.username or 'someone'} "
+                    f"has mentioned you in this group '{chat.title or 'chat'}'. "
+                    f"Respond warmly and let them know you're ready to help with their question: {message_text}"
+                )
+                actual_message = f"{greeting_context}\n\nUser's message: {message_text}"
+            else:
+                actual_message = message_text
+
             # Generate AI response with full context and preferred model
             response = await self.cerebras_chat.chat_with_history(
-                message_text,
+                actual_message,
                 conversation_history,
                 user_context=user_context,
                 model=preferred_model,
