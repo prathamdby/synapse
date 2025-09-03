@@ -1216,8 +1216,81 @@ Use the commands below to modify settings:
                 await query.edit_message_text(settings_text, parse_mode=ParseMode.HTML)
 
             elif callback_data == "change_model":
-                # Handle change model action
-                await self.model_command(update, context)
+                # Handle change model action for callback queries
+                user_id = update.effective_user.id
+
+                try:
+                    # Get available models from Cerebras
+                    available_models = await self.cerebras_chat.get_available_models()
+
+                    if not available_models:
+                        await query.edit_message_text(
+                            "🚫 <b>No Models Available</b>\n\nWell, that's weird. No models are showing up right now. Try again in a bit?",
+                            parse_mode=ParseMode.HTML,
+                        )
+                        return
+
+                    # Get user's current preferred model
+                    current_model = await self.db.get_user_preferred_model(user_id)
+
+                    # Create inline keyboard with available models
+                    keyboard = []
+                    models_per_row = 1  # One model per row for better readability
+
+                    for i in range(0, len(available_models), models_per_row):
+                        row = []
+                        for j in range(models_per_row):
+                            if i + j < len(available_models):
+                                model = available_models[i + j]
+                                # Add checkmark for current model and reasoning indicator
+                                reasoning_indicator = (
+                                    "🧠"
+                                    if self._model_supports_reasoning(model)
+                                    else ""
+                                )
+                                if model == current_model:
+                                    display_text = f"✅ {reasoning_indicator}{model}"
+                                else:
+                                    display_text = f"{reasoning_indicator}{model}"
+                                # Truncate display text if too long (Telegram button limit is ~64 chars)
+                                if len(display_text) > 50:
+                                    display_text = display_text[:47] + "..."
+                                row.append(
+                                    InlineKeyboardButton(
+                                        display_text,
+                                        callback_data=f"model_select:{model}",
+                                    )
+                                )
+                        keyboard.append(row)
+
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+
+                    model_message = f"""
+🤖 <b>Model Selection</b>
+
+<b>Current Model:</b> <code>{current_model}</code>
+
+Choose a different model to switch your AI experience:
+
+<b>Legend:</b>
+• ✅ Currently selected model
+• 🧠 Has reasoning features (the fancy stuff)
+
+<i>Don't worry - switching models won't delete our chat history.</i>
+                    """
+
+                    await query.edit_message_text(
+                        model_message,
+                        parse_mode=ParseMode.HTML,
+                        reply_markup=reply_markup,
+                    )
+
+                except Exception as model_error:
+                    logger.error(f"Error in model selection callback: {model_error}")
+                    await query.edit_message_text(
+                        "🚫 <b>Model List Error</b>\n\nI couldn't retrieve the available AI models. This could be due to:\n• Temporary service disruption\n• Network connectivity issues\n• API authentication problems\n\nPlease try:\n• Checking your Cerebras API key\n• Trying again in a minute\n• Using the currently selected model\n\nIf the problem persists, you can continue using the current model.",
+                        parse_mode=ParseMode.HTML,
+                    )
 
         except Exception as e:
             logger.error(f"Error in quick_action_callback: {e}")
