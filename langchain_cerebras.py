@@ -4,9 +4,13 @@ import logging
 from typing import Any, List, Mapping, Optional, Dict
 from langchain_core.language_models.llms import LLM
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
+from langchain_core.tools import Tool
+from langchain.agents import AgentType, initialize_agent
+from langchain.chains import ConversationChain
 
 from pydantic import Field
 from cerebras_client import CerebrasClient
+from searxng_client import SearxngClient
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +25,13 @@ class CerebrasLLM(LLM):
     reasoning_effort: str = "medium"
     cerebras_client: Optional[CerebrasClient] = Field(default=None, exclude=True)
 
-    def __init__(self, api_key: str = None, **kwargs):
+    def __init__(
+        self, api_key: str = None, searxng_client: SearxngClient = None, **kwargs
+    ):
         super().__init__(**kwargs)
-        self.cerebras_client = CerebrasClient(api_key=api_key)
+        self.cerebras_client = CerebrasClient(
+            api_key=api_key, searxng_client=searxng_client
+        )
 
     @property
     def _llm_type(self) -> str:
@@ -130,9 +138,60 @@ class CerebrasLLM(LLM):
 class CerebrasChat:
     """Chat interface for Cerebras with conversation management."""
 
-    def __init__(self, api_key: str = None):
-        self.cerebras_client = CerebrasClient(api_key=api_key)
-        self.llm = CerebrasLLM(api_key=api_key)
+    def __init__(self, api_key: str = None, searxng_client: SearxngClient = None):
+        self.cerebras_client = CerebrasClient(
+            api_key=api_key, searxng_client=searxng_client
+        )
+        self.llm = CerebrasLLM(api_key=api_key, searxng_client=searxng_client)
+        self.searxng_client = searxng_client
+        self.search_tool = self._create_search_tool() if searxng_client else None
+
+    def _create_search_tool(self) -> Optional[Tool]:
+        """Create search tool if SearXNG client is available."""
+        if not self.searxng_client:
+            return None
+
+        async def search_function(query: str) -> str:
+            """Search the web using SearXNG."""
+            try:
+                results = await self.searxng_client.search_with_summary(
+                    query=query, language="en", max_results=5
+                )
+
+                if not results or results["total_results"] == 0:
+                    return "No results found for the search query."
+
+                # Format results as a string
+                formatted_results = f"Search results for '{results['query']}':\n\n"
+                for i, result in enumerate(results["results"], 1):
+                    formatted_results += f"{i}. {result['title']}\n"
+                    formatted_results += f"   {result['content']}\n"
+                    formatted_results += f"   Source: {result['url']}\n\n"
+
+                return formatted_results
+            except Exception as e:
+                logger.error(f"Error during search: {e}")
+                return f"Error performing search: {str(e)}"
+
+        def sync_search_function(query: str) -> str:
+            """Synchronous wrapper for search function."""
+            import asyncio
+
+            try:
+                # Try to get the current event loop
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                # No event loop running, create a new one
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
+            return loop.run_until_complete(search_function(query))
+
+        return Tool(
+            name="web_search",
+            description="Search the web for current information. Use this when you need to find up-to-date information.",
+            func=sync_search_function,
+        )
 
     async def get_available_models(self) -> List[str]:
         """Get list of available Cerebras models."""
@@ -168,6 +227,57 @@ class CerebrasChat:
         except Exception as e:
             logger.error(f"Error in chat_with_history: {e}")
             return "🚫 <b>Processing Error</b>\n\nI encountered an issue while processing your message. This could be due to:\n• Temporary AI service disruption\n• Message too complex or long\n• Network connectivity issues\n\nPlease try:\n• Sending a shorter message\n• Rephrasing your question\n• Trying again in a minute\n\nIf the problem persists, consider using /reset to clear conversation history."
+
+    async def chat_with_search(
+        self,
+        message: str,
+        conversation_history: List[Dict[str, Any]],
+        system_prompt: str = None,
+        user_context: Dict[str, Any] = None,
+        model: str = None,
+    ) -> str:
+        """Chat with conversation history and search capability."""
+        try:
+            # If we have a search tool, use it with an agent
+            if self.search_tool:
+                # Create an agent with the search tool
+                agent = initialize_agent(
+                    tools=[self.search_tool],
+                    llm=self.llm,
+                    agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+                    verbose=True,
+                    handle_parsing_errors=True,
+                )
+
+                # Prepare the input with conversation history
+                history_text = "\n".join(
+                    [
+                        f"{entry['role']}: {entry['content']}"
+                        for entry in conversation_history[
+                            -5:
+                        ]  # Last 5 messages for context
+                    ]
+                )
+
+                full_input = (
+                    f"Conversation history:\n{history_text}\n\nUser message: {message}"
+                )
+
+                # Run the agent
+                response = agent.run(full_input)
+                return response
+            else:
+                # Fallback to regular chat if no search tool
+                return await self.chat_with_history(
+                    message, conversation_history, system_prompt, user_context, model
+                )
+
+        except Exception as e:
+            logger.error(f"Error in chat_with_search: {e}")
+            # Fallback to regular chat
+            return await self.chat_with_history(
+                message, conversation_history, system_prompt, user_context, model
+            )
 
     async def stream_response(
         self,

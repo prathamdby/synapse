@@ -9,6 +9,7 @@ A sophisticated Telegram bot powered by Cerebras AI that delivers intelligent co
 - **⚡ Instant Responses**: Leverages Cerebras's cutting-edge speed
 - **👥 Multi-User Support**: Isolated conversations for privacy
 - **🎛️ Model Selection**: Switch between available Cerebras models
+- **🔍 Web Search**: Search the web using self-hosted SearXNG instance
 - **📊 Usage Analytics**: Track interactions and preferences
 - **🔒 Rate Limited**: Fair usage controls for optimal performance
 - **👍 Smart Reactions**: Bot acknowledges messages with emoji reactions
@@ -106,6 +107,9 @@ DEFAULT_GROUP_MENTION_POLICY=mention_only
 GROUP_MAX_CONTEXT=40
 DEFAULT_GROUP_RATE_LIMIT=50
 DEFAULT_USER_RATE_LIMIT_IN_GROUPS=10
+
+# Search Functionality (optional)
+# SEARXNG_BASE_URL=http://localhost:8080  # Uncomment to enable web search
 ```
 
 **Note**: For Docker deployment, use `/app/data/bot_database.db` to ensure data persists across container rebuilds.
@@ -124,6 +128,7 @@ DEFAULT_USER_RATE_LIMIT_IN_GROUPS=10
 - `/reset` or `/clear` - Clear conversation history
 - `/stats` - View usage statistics and preferences
 - `/model` - Switch between available AI models
+- `/search <query>` - Search the web for information
 
 ### Group Commands (Admin Only)
 
@@ -150,6 +155,7 @@ synapse/
 - **DatabaseManager**: Persistent storage for users and conversations
 - **CerebrasClient**: Async API client for Cerebras AI models
 - **CerebrasLLM**: LangChain integration for advanced workflows
+- **SearxngClient**: Client for web search functionality (optional)
 
 ## 🔧 Development
 
