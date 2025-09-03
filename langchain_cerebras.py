@@ -5,8 +5,9 @@ from typing import Any, List, Mapping, Optional, Dict
 from langchain_core.language_models.llms import LLM
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 from langchain_core.tools import Tool
-from langchain.agents import AgentType, initialize_agent
-from langchain.chains import ConversationChain
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 
 from pydantic import Field
 from cerebras_client import CerebrasClient
@@ -179,17 +180,25 @@ class CerebrasChat:
 
             try:
                 # Try to get the current event loop
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                # No event loop running, create a new one
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
+                loop = asyncio.get_event_loop()
+                # If we're in a running loop, create a task
+                if loop.is_running():
+                    # Create a new event loop in a separate thread
+                    import concurrent.futures
 
-            return loop.run_until_complete(search_function(query))
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(asyncio.run, search_function(query))
+                        return future.result()
+                else:
+                    # No event loop running, use asyncio.run
+                    return asyncio.run(search_function(query))
+            except RuntimeError:
+                # No event loop, use asyncio.run
+                return asyncio.run(search_function(query))
 
         return Tool(
             name="web_search",
-            description="Search the web for current information. Use this when you need to find up-to-date information.",
+            description="Search the web for current information. Use this when you need to find up-to-date information. Input should be a search query.",
             func=sync_search_function,
         )
 
@@ -238,34 +247,64 @@ class CerebrasChat:
     ) -> str:
         """Chat with conversation history and search capability."""
         try:
-            # If we have a search tool, use it with an agent
+            # If we have a search tool, first check if we need to search
             if self.search_tool:
-                # Create an agent with the search tool
-                agent = initialize_agent(
-                    tools=[self.search_tool],
-                    llm=self.llm,
-                    agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-                    verbose=True,
-                    handle_parsing_errors=True,
-                )
-
-                # Prepare the input with conversation history
-                history_text = "\n".join(
+                # Create a prompt to determine if we need to search
+                search_decision_prompt = ChatPromptTemplate.from_messages(
                     [
-                        f"{entry['role']}: {entry['content']}"
-                        for entry in conversation_history[
-                            -5:
-                        ]  # Last 5 messages for context
+                        (
+                            "system",
+                            "You are a helpful AI assistant. Determine if the user's question requires current information that might not be in your training data. If so, respond with 'SEARCH_NEEDED: [search query]'. Otherwise, respond with 'NO_SEARCH_NEEDED'.",
+                        ),
+                        ("human", "{input}"),
                     ]
                 )
 
-                full_input = (
-                    f"Conversation history:\n{history_text}\n\nUser message: {message}"
+                # Create chain to decide if search is needed
+                search_decision_chain = (
+                    search_decision_prompt | self.llm | StrOutputParser()
                 )
 
-                # Run the agent
-                response = agent.run(full_input)
-                return response
+                # Check if search is needed
+                decision = search_decision_chain.invoke({"input": message})
+
+                if decision.startswith("SEARCH_NEEDED:"):
+                    search_query = decision.replace("SEARCH_NEEDED:", "").strip()
+                    # Perform the search
+                    search_results = self.search_tool.func(search_query)
+
+                    # Create a prompt that includes the search results
+                    search_prompt = ChatPromptTemplate.from_messages(
+                        [
+                            (
+                                "system",
+                                "You are a helpful AI assistant. Use the provided search results to answer the user's question accurately. If the search results don't contain relevant information, say so.",
+                            ),
+                            (
+                                "human",
+                                "Question: {question}\n\nSearch Results:\n{search_results}",
+                            ),
+                        ]
+                    )
+
+                    # Create chain with search results
+                    search_chain = search_prompt | self.llm | StrOutputParser()
+
+                    # Generate response using search results
+                    response = search_chain.invoke(
+                        {"question": message, "search_results": search_results}
+                    )
+
+                    return response
+                else:
+                    # No search needed, proceed with normal chat
+                    return await self.chat_with_history(
+                        message,
+                        conversation_history,
+                        system_prompt,
+                        user_context,
+                        model,
+                    )
             else:
                 # Fallback to regular chat if no search tool
                 return await self.chat_with_history(
