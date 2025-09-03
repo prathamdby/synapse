@@ -254,7 +254,17 @@ class CerebrasChat:
                     [
                         (
                             "system",
-                            "You are a helpful AI assistant. Determine if the user's question requires current information that might not be in your training data. If so, respond with 'SEARCH_NEEDED: [search query]'. Otherwise, respond with 'NO_SEARCH_NEEDED'.",
+                            """You are a helpful AI assistant. Determine if the user's question requires current information that might not be in your training data. If so, respond with 'SEARCH_NEEDED: [search query]'. Otherwise, respond with 'NO_SEARCH_NEEDED'.
+                    
+When responding to users, ALWAYS use proper HTML formatting that is compatible with Telegram:
+- Use <b>bold</b> for important terms
+- Use <i>italics</i> for emphasis
+- Use <code>code</code> for technical terms
+- Use <a href="url">links</a> for URLs
+- Keep responses under 4000 characters
+- NEVER use markdown formatting like **bold** or _italics_
+- NEVER use empty tags like <>
+- NEVER use custom tags like <vec> or <string>""",
                         ),
                         ("human", "{input}"),
                     ]
@@ -273,12 +283,33 @@ class CerebrasChat:
                     # Perform the search
                     search_results = self.search_tool.func(search_query)
 
-                    # Create a prompt that includes the search results
+                    # Create a prompt that includes the search results with HTML formatting instructions
                     search_prompt = ChatPromptTemplate.from_messages(
                         [
                             (
                                 "system",
-                                "You are a helpful AI assistant. Use the provided search results to answer the user's question accurately. If the search results don't contain relevant information, say so.",
+                                """You are a helpful AI assistant. Use the provided search results to answer the user's question accurately. If the search results don't contain relevant information, say so.
+                        
+When responding to users, ALWAYS use proper HTML formatting that is compatible with Telegram:
+- Use <b>bold</b> for important terms and headings
+- Use <i>italics</i> for emphasis
+- Use <code>code</code> for technical terms
+- Use <a href="url">links</a> for URLs
+- Use bullet points with • for lists
+- Keep responses under 4000 characters
+- NEVER use markdown formatting like **bold** or _italics_
+- NEVER use empty tags like <>
+- NEVER use custom tags like <vec> or <string>
+- NEVER use <br> tags - use actual newlines instead
+- NEVER use <h1> or other heading tags - use <b> instead
+
+Format your response with clear structure and proper HTML tags. Example:
+<b>Latest News</b>
+
+• <b>Important Update</b>: Brief description with <i>emphasis</i> where needed
+• <b>Another Item</b>: Description with <a href="url">link</a> if relevant
+
+Always keep your responses concise and well-formatted.""",
                             ),
                             (
                                 "human",
@@ -317,28 +348,3 @@ class CerebrasChat:
             return await self.chat_with_history(
                 message, conversation_history, system_prompt, user_context, model
             )
-
-    async def stream_response(
-        self,
-        message: str,
-        conversation_history: List[Dict[str, Any]],
-        system_prompt: str = None,
-    ):
-        """Stream response for real-time updates."""
-        try:
-            updated_history = conversation_history + [
-                {"role": "user", "content": message}
-            ]
-
-            messages = self.cerebras_client.format_conversation_for_cerebras(
-                updated_history, system_prompt
-            )
-
-            # Note: Streaming implementation would go here
-            # For now, return the full response
-            response = await self.cerebras_client.generate_response(messages)
-            yield response
-
-        except Exception as e:
-            logger.error(f"Error in stream_response: {e}")
-            yield "Well, that didn't work. Something went wrong on my end."
