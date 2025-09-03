@@ -15,7 +15,15 @@ import html
 
 import structlog
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters, BotCommand, BotCommandScopeDefault, BotCommandScopeAllGroupChats
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    ReplyParameters,
+    BotCommand,
+    BotCommandScopeDefault,
+    BotCommandScopeAllGroupChats,
+)
 from telegram.constants import ChatAction, ParseMode
 from telegram.ext import (
     Application,
@@ -154,7 +162,7 @@ class TelegramBot:
                 BotCommand("stats", "Show your usage statistics"),
                 BotCommand("model", "Switch AI models"),
             ]
-            
+
             # Define commands for group chats (includes all private commands plus group-specific ones)
             group_commands = [
                 BotCommand("start", "Welcome message and bot introduction"),
@@ -167,25 +175,23 @@ class TelegramBot:
                 BotCommand("group_reset", "Reset group conversations (admin only)"),
                 BotCommand("group_stats", "Show group statistics"),
             ]
-            
+
             # Register commands for private chats (default scope)
             await application.bot.set_my_commands(
-                commands=private_commands,
-                scope=BotCommandScopeDefault()
+                commands=private_commands, scope=BotCommandScopeDefault()
             )
-            
+
             # Register commands for all group chats
             await application.bot.set_my_commands(
-                commands=group_commands,
-                scope=BotCommandScopeAllGroupChats()
+                commands=group_commands, scope=BotCommandScopeAllGroupChats()
             )
-            
+
             logger.info(
                 "Bot commands registered successfully",
                 private_commands_count=len(private_commands),
-                group_commands_count=len(group_commands)
+                group_commands_count=len(group_commands),
             )
-            
+
         except Exception as e:
             logger.error("Failed to register bot commands", error=str(e))
             # Don't fail initialization if command registration fails
@@ -268,6 +274,23 @@ Max {self.rate_limit_messages} messages per person every {self.rate_limit_window
 
 Questions? Just mention me and ask 🤷‍♂️
             """
+
+            # Create inline keyboard for group commands
+            keyboard = [
+                [
+                    InlineKeyboardButton("🔄 Reset Chat", callback_data="quick_reset"),
+                    InlineKeyboardButton("📊 Group Stats", callback_data="group_stats"),
+                ],
+                [
+                    InlineKeyboardButton(
+                        "⚙️ Group Settings", callback_data="group_settings"
+                    ),
+                    InlineKeyboardButton(
+                        "🤖 Change Model", callback_data="change_model"
+                    ),
+                ],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
         else:
             help_message = f"""
 <b>Commands &amp; how this works</b>
@@ -302,9 +325,24 @@ Max {self.rate_limit_messages} messages every {self.rate_limit_window} seconds. 
 Got questions? Just ask 🤷‍♂️
             """
 
+            # Create inline keyboard for private commands
+            keyboard = [
+                [
+                    InlineKeyboardButton("🔄 Reset Chat", callback_data="quick_reset"),
+                    InlineKeyboardButton("📊 Your Stats", callback_data="user_stats"),
+                ],
+                [
+                    InlineKeyboardButton(
+                        "🤖 Change Model", callback_data="change_model"
+                    ),
+                ],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
         await update.message.reply_text(
             help_message,
             parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup,
             reply_parameters=ReplyParameters(message_id=update.message.message_id),
         )
 
@@ -436,7 +474,7 @@ Choose a different model to switch your AI experience:
         except Exception as e:
             logger.error(f"Error in model_command: {e}")
             await update.message.reply_text(
-                "🚫 <b>Error</b>\n\nCouldn't grab the model list. Something's acting up. Try again?",
+                "🚫 <b>Model List Error</b>\n\nI couldn't retrieve the available AI models. This could be due to:\n• Temporary service disruption\n• Network connectivity issues\n• API authentication problems\n\nPlease try:\n• Checking your Cerebras API key\n• Trying again in a minute\n• Using the currently selected model\n\nIf the problem persists, you can continue using the current model.",
                 parse_mode=ParseMode.HTML,
                 reply_parameters=ReplyParameters(message_id=update.message.message_id),
             )
@@ -475,7 +513,7 @@ Your chat history's still there, just running on a different brain now.
         except Exception as e:
             logger.error(f"Error in model_callback: {e}")
             await query.edit_message_text(
-                "🚫 <b>Error</b>\n\nThat didn't work. Something went wrong updating your model. Give it another shot?",
+                "🚫 <b>Model Update Error</b>\n\nI couldn't update your preferred AI model. This could be due to:\n• Temporary database issues\n• Invalid model selection\n• Network connectivity problems\n\nPlease try:\n• Selecting the model again\n• Using /model to retry\n• Continuing with your current model\n\nIf the problem persists, your current model will continue to work.",
                 parse_mode=ParseMode.HTML,
             )
 
@@ -521,10 +559,16 @@ Your chat history's still there, just running on a different brain now.
             if not await self.db.check_group_rate_limit(
                 chat_id, group_rate_limit, rate_window
             ):
+                # Get time remaining before rate limit resets
+                time_remaining = await self.db.get_rate_limit_time_remaining(
+                    "group", chat_id, rate_window
+                )
+
                 await update.message.reply_text(
                     f"⏳ <b>Group rate limit exceeded</b>\n\n"
                     f"This group has reached its message limit. "
-                    f"Limit: <i>{group_rate_limit}</i> messages per <i>{rate_window}</i> seconds.",
+                    f"Limit: <i>{group_rate_limit}</i> messages per <i>{rate_window}</i> seconds.\n\n"
+                    f"⏰ <b>Try again in:</b> <code>{time_remaining}</code> seconds",
                     parse_mode=ParseMode.HTML,
                     reply_parameters=ReplyParameters(
                         message_id=update.message.message_id
@@ -543,10 +587,16 @@ Your chat history's still there, just running on a different brain now.
         if not await self.db.check_rate_limit(
             user_id, user_rate_limit, self.rate_limit_window
         ):
+            # Get time remaining before rate limit resets
+            time_remaining = await self.db.get_rate_limit_time_remaining(
+                "user", user_id, self.rate_limit_window
+            )
+
             await update.message.reply_text(
                 f"⏳ <b>Rate limit exceeded</b>\n\n"
                 f"Slow down there, speed racer. "
-                f"Limit: <i>{user_rate_limit}</i> messages per <i>{self.rate_limit_window}</i> seconds.",
+                f"Limit: <i>{user_rate_limit}</i> messages per <i>{self.rate_limit_window}</i> seconds.\n\n"
+                f"⏰ <b>Try again in:</b> <code>{time_remaining}</code> seconds",
                 parse_mode=ParseMode.HTML,
                 reply_parameters=ReplyParameters(message_id=update.message.message_id),
             )
@@ -714,7 +764,7 @@ Your chat history's still there, just running on a different brain now.
             )
             if not response_sent:
                 await update.message.reply_text(
-                    "🚫 <b>Error</b>\n\nWell, that's embarrassing. Something broke on my end. Give it another try?",
+                    "🚫 <b>Processing Error</b>\n\nI encountered an issue while processing your message. This could be due to:\n• Temporary AI service disruption\n• Message too complex or long\n• Network connectivity issues\n\nPlease try:\n• Sending a shorter message\n• Rephrasing your question\n• Trying again in a minute\n\nIf the problem persists, consider using /reset to clear conversation history.",
                     parse_mode=ParseMode.HTML,
                     reply_parameters=ReplyParameters(
                         message_id=update.message.message_id
@@ -848,9 +898,42 @@ Use the commands below to modify settings:
 • <code>/group_reset</code> - Reset conversations
         """
 
+        # Create inline keyboard for quick toggles
+        current_mode = settings.get("mode", "shared")
+        current_mention_policy = settings.get("mention_policy", "mention_only")
+        reactions_enabled = settings.get("enable_reactions", False)
+
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    f"🧠 Memory: {current_mode.title()}",
+                    callback_data=f"toggle_mode:{'personal' if current_mode == 'shared' else 'shared'}:{chat_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    f"📢 Mentions: {current_mention_policy.replace('_', ' ').title()}",
+                    callback_data=f"toggle_mentions:{'all' if current_mention_policy == 'mention_only' else 'mention_only'}:{chat_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    f"👍 Reactions: {'On' if reactions_enabled else 'Off'}",
+                    callback_data=f"toggle_reactions:{'false' if reactions_enabled else 'true'}:{chat_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔄 Reset Group Chat", callback_data=f"quick_group_reset:{chat_id}"
+                ),
+            ],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
         await update.message.reply_text(
             settings_text,
             parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup,
             reply_parameters=ReplyParameters(message_id=update.message.message_id),
         )
 
@@ -985,6 +1068,248 @@ Start chatting to build group stats!
                 parse_mode=ParseMode.HTML,
             )
 
+    async def quick_action_callback(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
+        """Handle quick action callbacks from inline buttons."""
+        query = update.callback_query
+        await query.answer()
+
+        try:
+            callback_data = query.data
+
+            if callback_data == "quick_reset":
+                # Handle quick reset action
+                user_id = update.effective_user.id
+                await self.db.clear_conversation_history(user_id)
+
+                await query.edit_message_text(
+                    "🔄 <b>Memory wiped</b>\n\n"
+                    "Your chat history is gone. Clean slate. "
+                    "What's on your mind?",
+                    parse_mode=ParseMode.HTML,
+                )
+
+            elif callback_data == "user_stats":
+                # Handle user stats action
+                user_id = update.effective_user.id
+                stats = await self.db.get_user_stats(user_id)
+                preferred_model = await self.db.get_user_preferred_model(user_id)
+
+                if stats:
+                    stats_message = f"""
+📊 <b>Your stats</b>
+
+<b>Who you are:</b>
+• Username: <code>@{html.escape(str(stats.get('username', 'N/A')))}</code>
+• Name: <i>{html.escape(str(stats.get('first_name', 'N/A')))}</i>
+• Joined: <u>{stats.get('created_at', 'N/A')[:10]}</u>
+• Last seen: <u>{stats.get('last_active', 'N/A')[:10]}</u>
+
+<b>Current setup:</b>
+• Model: <code>{preferred_model}</code>
+
+<b>How much you talk to me:</b>
+• Messages sent: <b>{stats.get('total_messages', 0)}</b>
+• Times I reacted: <b>{stats.get('reaction_count', 0)}</b>
+
+Keep chatting and watch these numbers go up 📈
+                    """
+                else:
+                    stats_message = f"""
+📊 <b>No stats yet</b> 
+
+<b>Current setup:</b>
+• Model: <code>{preferred_model}</code>
+
+Start chatting and I'll track some numbers for you.
+                    """
+
+                await query.edit_message_text(stats_message, parse_mode=ParseMode.HTML)
+
+            elif callback_data == "group_stats":
+                # Handle group stats action
+                if update.effective_chat.type == "private":
+                    await query.edit_message_text(
+                        "This feature is only available in groups.",
+                        parse_mode=ParseMode.HTML,
+                    )
+                    return
+
+                chat_id = update.effective_chat.id
+                await self.db.get_or_create_group(
+                    chat_id, update.effective_chat.title, update.effective_chat.type
+                )
+
+                stats = await self.db.get_group_stats(chat_id)
+                settings = await self.db.get_group_settings(chat_id)
+
+                if stats:
+                    stats_message = f"""
+📊 <b>Group Statistics</b>
+
+<b>Group Info:</b>
+• Title: <i>{html.escape(str(stats.get('title', 'N/A')))}</i>
+• Type: <code>{stats.get('type', 'N/A')}</code>
+• Created: <u>{stats.get('created_at', 'N/A')[:10]}</u>
+• Last Active: <u>{stats.get('last_active', 'N/A')[:10]}</u>
+
+<b>Conversation Stats:</b>
+• Active Threads: <b>{stats.get('thread_count', 0)}</b>
+• Total Messages: <b>{stats.get('total_messages', 0)}</b>
+• Memory Mode: <code>{settings.get('mode', 'shared')}</code>
+
+Keep chatting to see these numbers grow! 📈
+                    """
+                else:
+                    stats_message = f"""
+📊 <b>No statistics available yet.</b>
+
+<b>Current Settings:</b>
+• Memory Mode: <code>{settings.get('mode', 'shared')}</code>
+• Mention Policy: <code>{settings.get('mention_policy', 'mention_only')}</code>
+
+Start chatting to build group stats!
+                    """
+
+                await query.edit_message_text(stats_message, parse_mode=ParseMode.HTML)
+
+            elif callback_data == "group_settings":
+                # Handle group settings action
+                if update.effective_chat.type == "private":
+                    await query.edit_message_text(
+                        "This feature is only available in groups.",
+                        parse_mode=ParseMode.HTML,
+                    )
+                    return
+
+                if not await self._is_user_admin(update, context):
+                    await query.edit_message_text(
+                        "🚫 <b>Admin Only</b>\n\nOnly group administrators can use this feature.",
+                        parse_mode=ParseMode.HTML,
+                    )
+                    return
+
+                chat_id = update.effective_chat.id
+                await self.db.get_or_create_group(
+                    chat_id, update.effective_chat.title, update.effective_chat.type
+                )
+                settings = await self.db.get_group_settings(chat_id)
+
+                settings_text = f"""
+🔧 <b>Group Settings</b>
+
+<b>Memory Mode:</b> <code>{settings.get('mode', 'shared')}</code>
+<b>Mention Policy:</b> <code>{settings.get('mention_policy', 'mention_only')}</code>
+<b>Model:</b> <code>{settings.get('model', 'default (user preference)')}</code>
+<b>Max Context Messages:</b> <code>{settings.get('max_context_msgs', 40)}</code>
+<b>Per-User Rate Limit:</b> <code>{settings.get('per_user_rate_limit', 10)}</code>/min
+<b>Per-Group Rate Limit:</b> <code>{settings.get('per_group_rate_limit', 50)}</code>/min
+<b>Enable Reactions:</b> <code>{'Yes' if settings.get('enable_reactions', False) else 'No'}</code>
+
+Use the commands below to modify settings:
+• <code>/group_mode</code> - Change memory mode
+• <code>/group_model</code> - Set group model
+• <code>/group_reset</code> - Reset conversations
+                """
+
+                await query.edit_message_text(settings_text, parse_mode=ParseMode.HTML)
+
+            elif callback_data == "change_model":
+                # Handle change model action
+                await self.model_command(update, context)
+
+        except Exception as e:
+            logger.error(f"Error in quick_action_callback: {e}")
+            await query.edit_message_text(
+                "🚫 <b>Error</b>\n\nThat didn't work. Something went wrong processing your request. Try again?",
+                parse_mode=ParseMode.HTML,
+            )
+
+    async def group_toggle_callback(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
+        """Handle group settings toggle callbacks."""
+        query = update.callback_query
+        await query.answer()
+
+        try:
+            callback_data = query.data
+            parts = callback_data.split(":")
+            action = parts[0]
+
+            if action == "toggle_mode":
+                mode, chat_id = parts[1], int(parts[2])
+                await self.db.update_group_setting(chat_id, "mode", mode)
+
+                mode_description = (
+                    "I'll remember stuff for the whole group now."
+                    if mode == "shared"
+                    else "I'll track conversations per person now."
+                )
+
+                await query.edit_message_text(
+                    f"🔧 <b>Group mode switched!</b>\n\n"
+                    f"<b>Now using:</b> <code>{mode}</code>\n\n"
+                    f"{mode_description}",
+                    parse_mode=ParseMode.HTML,
+                )
+
+            elif action == "toggle_mentions":
+                policy, chat_id = parts[1], int(parts[2])
+                await self.db.update_group_setting(chat_id, "mention_policy", policy)
+
+                policy_description = (
+                    "I'll respond to all messages in the group now."
+                    if policy == "all"
+                    else "I'll only respond when mentioned or replied to."
+                )
+
+                await query.edit_message_text(
+                    f"📢 <b>Mention policy updated!</b>\n\n"
+                    f"<b>Now using:</b> <code>{policy.replace('_', ' ')}</code>\n\n"
+                    f"{policy_description}",
+                    parse_mode=ParseMode.HTML,
+                )
+
+            elif action == "toggle_reactions":
+                enable, chat_id = parts[1], int(parts[2])
+                enable_bool = enable.lower() == "true"
+                await self.db.update_group_setting(
+                    chat_id, "enable_reactions", enable_bool
+                )
+
+                reaction_description = (
+                    "I'll react with 👍 to user messages now."
+                    if enable_bool
+                    else "I'll no longer react to user messages."
+                )
+
+                await query.edit_message_text(
+                    f"👍 <b>Reaction setting updated!</b>\n\n"
+                    f"<b>Now:</b> <code>{'Enabled' if enable_bool else 'Disabled'}</code>\n\n"
+                    f"{reaction_description}",
+                    parse_mode=ParseMode.HTML,
+                )
+
+            elif action == "quick_group_reset":
+                chat_id = int(parts[1])
+                await self.db.clear_group_conversation_history(chat_id)
+
+                await query.edit_message_text(
+                    "🔄 <b>Group memory wiped</b>\n\n"
+                    "All the group chat history is gone. Fresh start. "
+                    "What's up?",
+                    parse_mode=ParseMode.HTML,
+                )
+
+        except Exception as e:
+            logger.error(f"Error in group_toggle_callback: {e}")
+            await query.edit_message_text(
+                "🚫 <b>Error</b>\n\nThat didn't work. Something went wrong updating group settings. Try again?",
+                parse_mode=ParseMode.HTML,
+            )
+
     def create_application(self) -> Application:
         """Create and configure the Telegram application."""
         application = Application.builder().token(self.token).build()
@@ -1012,6 +1337,18 @@ Start chatting to build group stats!
         application.add_handler(
             CallbackQueryHandler(self.group_callback, pattern="^group_mode:")
         )
+        application.add_handler(
+            CallbackQueryHandler(
+                self.quick_action_callback,
+                pattern="^(quick_reset|user_stats|group_stats|group_settings|change_model)$",
+            )
+        )
+        application.add_handler(
+            CallbackQueryHandler(
+                self.group_toggle_callback,
+                pattern="^(toggle_mode|toggle_mentions|toggle_reactions|quick_group_reset):",
+            )
+        )
 
         # Message handler (should be last)
         application.add_handler(
@@ -1029,10 +1366,10 @@ Start chatting to build group stats!
         logger.info("Starting Telegram bot...")
         await application.initialize()
         await application.start()
-        
+
         # Register bot commands in Telegram's menu
         await self._register_bot_commands(application)
-        
+
         await application.updater.start_polling()
 
         try:

@@ -167,7 +167,7 @@ class CerebrasChat:
 
         except Exception as e:
             logger.error(f"Error in chat_with_history: {e}")
-            return "Something broke while I was processing that. Try again?"
+            return "🚫 <b>Processing Error</b>\n\nI encountered an issue while processing your message. This could be due to:\n• Temporary AI service disruption\n• Message too complex or long\n• Network connectivity issues\n\nPlease try:\n• Sending a shorter message\n• Rephrasing your question\n• Trying again in a minute\n\nIf the problem persists, consider using /reset to clear conversation history."
 
     async def stream_response(
         self,

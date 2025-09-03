@@ -75,10 +75,10 @@ class CerebrasClient:
 
         except asyncio.TimeoutError:
             logger.error("Cerebras API call timed out")
-            return "⏱️ <b>Taking forever</b>\n\nYeah, this is taking way too long. Try a shorter message maybe?"
+            return "⏱️ <b>Request Timeout</b>\n\nThe AI service is taking too long to respond. This could be due to:\n• Complex request requiring more processing time\n• Temporary service slowdown\n• Network connectivity issues\n\nPlease try:\n• Sending a shorter message\n• Rephrasing your question\n• Trying again in a minute\n\nIf the problem persists, consider using /reset to clear conversation history."
         except Exception as e:
             logger.error(f"Error generating response from Cerebras: {e}")
-            return "🚫 <b>AI Error</b>\n\nWell, something's broken on the AI side. Try again in a sec?"
+            return "🚫 <b>AI Service Error</b>\n\nThe AI service encountered an issue. This could be due to:\n• Temporary service disruption\n• Request too complex or long\n• Invalid request format\n\nPlease try:\n• Sending a shorter message\n• Rephrasing your question\n• Trying again in a minute\n\nIf the problem persists, consider using /reset to clear conversation history."
 
     def _sync_generate_response(
         self,

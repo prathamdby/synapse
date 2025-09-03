@@ -382,6 +382,29 @@ class DatabaseManager:
                 await db.commit()
                 return True
 
+    async def get_rate_limit_time_remaining(
+        self, scope: str, entity_id: int, window_seconds: int
+    ) -> int:
+        """Get the time remaining before rate limit resets."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT window_start FROM rate_limits WHERE scope = ? AND entity_id = ?",
+                (scope, entity_id),
+            )
+            result = await cursor.fetchone()
+
+            if result:
+                window_start = datetime.fromisoformat(result[0])
+                current_time = datetime.now()
+                elapsed = (current_time - window_start).seconds
+                remaining = window_seconds - elapsed
+
+                # Ensure we don't return negative values
+                return max(0, remaining)
+            else:
+                # No rate limit entry, so no time remaining
+                return 0
+
     async def get_user_stats(self, user_id: int) -> Dict[str, Any]:
         """Get statistics for a user."""
         async with aiosqlite.connect(self.db_path) as db:
