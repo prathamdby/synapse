@@ -37,7 +37,6 @@ from telegram.ext import (
 from database import DatabaseManager
 from cerebras_client import CerebrasClient
 from langchain_cerebras import CerebrasChat
-from searxng_client import SearxngClient
 
 # Load environment variables
 load_dotenv()
@@ -74,16 +73,8 @@ class TelegramBot:
 
         self.db = DatabaseManager(os.getenv("DATABASE_PATH", "./bot_database.db"))
 
-        # Initialize SearXNG client if base URL is provided
-        searxng_base_url = os.getenv("SEARXNG_BASE_URL")
-        self.searxng_client = (
-            SearxngClient(searxng_base_url) if searxng_base_url else None
-        )
-
-        # Pass the SearxngClient to CerebrasChat
-        self.cerebras_chat = CerebrasChat(
-            api_key=os.getenv("CEREBRAS_API_KEY"), searxng_client=self.searxng_client
-        )
+        # Initialize Cerebras chat client
+        self.cerebras_chat = CerebrasChat(api_key=os.getenv("CEREBRAS_API_KEY"))
 
         # Rate limiting configuration
         self.rate_limit_messages = int(
@@ -172,7 +163,6 @@ class TelegramBot:
                 BotCommand("reset", "Clear conversation history"),
                 BotCommand("stats", "Show your usage statistics"),
                 BotCommand("model", "Switch AI models"),
-                BotCommand("search", "Search the web for information"),
             ]
 
             # Define commands for group chats (includes all private commands plus group-specific ones)
@@ -182,7 +172,6 @@ class TelegramBot:
                 BotCommand("reset", "Clear conversation history"),
                 BotCommand("stats", "Show your usage statistics"),
                 BotCommand("model", "Switch AI models"),
-                BotCommand("search", "Search the web for information"),
                 BotCommand("group_mode", "Change group memory mode (admin only)"),
                 BotCommand("group_settings", "View group settings (admin only)"),
                 BotCommand("group_reset", "Reset group conversations (admin only)"),
@@ -266,7 +255,6 @@ Anyway... what's up? 🤷‍♂️
 • <code>/reset</code> - Wipe our chat clean
 • <code>/stats</code> - See how chatty you've been
 • <code>/model</code> - Switch AI models
-• <code>/search &lt;query&gt;</code> - Search the web
 
 <b>Admin commands (if you're in charge):</b>
 • <code>/group_mode</code> - Shared memory vs personal memory
@@ -315,7 +303,6 @@ Questions? Just mention me and ask 🤷‍♂️
 • <code>/reset</code> - Forget everything we've talked about
 • <code>/stats</code> - See your usage stats
 • <code>/model</code> - Switch AI models
-• <code>/search &lt;query&gt;</code> - Search the web
 
 <b>How to use me:</b>
 Just... talk to me? Like, send a message and I'll respond. That's it.
@@ -327,14 +314,12 @@ I remember our entire conversation, so you can reference stuff from ages ago if 
 • Respond stupid fast (Cerebras is legit)
 • Handle weird questions without judgment
 • Work in groups if you add me there
-• Search the web for current information
 
 <b>Tips I guess:</b>
 • Be specific if you want better answers
 • Reference old topics - I'll remember
 • Use <code>/reset</code> if you want a fresh start
 • Check <code>/stats</code> to see how much you've been chatting
-• Use <code>/search &lt;query&gt;</code> to look up current information
 
 <b>Rate limits:</b>
 Max {self.rate_limit_messages} messages every {self.rate_limit_window} seconds. Don't spam and we're good.
@@ -495,93 +480,6 @@ Choose a different model to switch your AI experience:
                 parse_mode=ParseMode.HTML,
                 reply_parameters=ReplyParameters(message_id=update.message.message_id),
             )
-
-    async def search_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /search command to perform web searches."""
-        if not self.searxng_client:
-            await update.message.reply_text(
-                "🚫 <b>Search Not Available</b>\n\nWeb search functionality is not configured. Please contact the bot administrator.",
-                parse_mode=ParseMode.HTML,
-                reply_parameters=ReplyParameters(message_id=update.message.message_id),
-            )
-            return
-
-        # Get the search query from the command arguments
-        if not context.args:
-            await update.message.reply_text(
-                "🔍 <b>Search Usage</b>\n\nUse: <code>/search your query here</code>\n\nExample: <code>/search latest news about AI</code>",
-                parse_mode=ParseMode.HTML,
-                reply_parameters=ReplyParameters(message_id=update.message.message_id),
-            )
-            return
-
-        query = " ".join(context.args)
-        user = update.effective_user
-        user_id = user.id
-
-        # Ensure user exists in database
-        await self.db.get_or_create_user(
-            user_id, user.username, user.first_name, user.last_name
-        )
-
-        # Start typing indicator
-        await self.start_typing_indicator(update, context)
-
-        try:
-            # Perform the search
-            search_results = await self.searxng_client.search_with_summary(
-                query=query, language="en", max_results=5
-            )
-
-            if search_results is None:
-                await update.message.reply_text(
-                    "🚫 <b>Search Error</b>\n\nI encountered an issue while performing your search. This could be due to:\n• Temporary service disruption\n• Network connectivity issues\n• Invalid search query\n\nPlease try again in a minute.",
-                    parse_mode=ParseMode.HTML,
-                    reply_parameters=ReplyParameters(
-                        message_id=update.message.message_id
-                    ),
-                )
-                return
-
-            if search_results["total_results"] == 0:
-                await update.message.reply_text(
-                    f"🔍 <b>No Results Found</b>\n\nI couldn't find any results for: <code>{html.escape(query)}</code>\n\nTry rephrasing your search or using different keywords.",
-                    parse_mode=ParseMode.HTML,
-                    reply_parameters=ReplyParameters(
-                        message_id=update.message.message_id
-                    ),
-                )
-                return
-
-            # Format the search results
-            results_text = (
-                f"🔍 <b>Search Results for:</b> <code>{html.escape(query)}</code>\n\n"
-            )
-
-            for i, result in enumerate(search_results["results"], 1):
-                results_text += f"{i}. <a href=\"{html.escape(result['url'])}\">{html.escape(result['title'])}</a>\n"
-                results_text += f"   {html.escape(result['content'])}\n\n"
-
-            # Add a note about the search
-            results_text += "<i>Results provided by SearXNG search engine</i>"
-
-            await update.message.reply_text(
-                results_text,
-                parse_mode=ParseMode.HTML,
-                reply_parameters=ReplyParameters(message_id=update.message.message_id),
-                disable_web_page_preview=True,
-            )
-
-        except Exception as e:
-            logger.error(f"Error in search_command: {e}")
-            await update.message.reply_text(
-                "🚫 <b>Search Error</b>\n\nI encountered an issue while performing your search. Please try again later.",
-                parse_mode=ParseMode.HTML,
-                reply_parameters=ReplyParameters(message_id=update.message.message_id),
-            )
-        finally:
-            # Stop typing indicator
-            await self.stop_typing_indicator(user_id)
 
     async def model_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle model selection callback from inline keyboard."""
@@ -802,21 +700,12 @@ Your chat history's still there, just running on a different brain now.
                 actual_message = message_text
 
             # Generate AI response with full context and preferred model
-            # Use search-enabled chat if SearXNG is configured
-            if self.searxng_client:
-                response = await self.cerebras_chat.chat_with_search(
-                    actual_message,
-                    conversation_history,
-                    user_context=user_context,
-                    model=preferred_model,
-                )
-            else:
-                response = await self.cerebras_chat.chat_with_history(
-                    actual_message,
-                    conversation_history,
-                    user_context=user_context,
-                    model=preferred_model,
-                )
+            response = await self.cerebras_chat.chat_with_history(
+                actual_message,
+                conversation_history,
+                user_context=user_context,
+                model=preferred_model,
+            )
 
             # Update conversation history based on scope
             updated_history = conversation_history + [
@@ -1507,7 +1396,6 @@ Choose a different model to switch your AI experience:
         application.add_handler(CommandHandler("clear", self.reset_command))
         application.add_handler(CommandHandler("stats", self.stats_command))
         application.add_handler(CommandHandler("model", self.model_command))
-        application.add_handler(CommandHandler("search", self.search_command))
 
         # Group commands
         application.add_handler(CommandHandler("group_mode", self.group_mode_command))

@@ -13,14 +13,13 @@ logger = logging.getLogger(__name__)
 class CerebrasClient:
     """Client for interacting with Cerebras AI models."""
 
-    def __init__(self, api_key: str = None, searxng_client=None):
+    def __init__(self, api_key: str = None):
         self.api_key = api_key or os.getenv("CEREBRAS_API_KEY")
         if not self.api_key:
             raise ValueError("Cerebras API key is required")
 
         self.client = Cerebras(api_key=self.api_key, timeout=30.0)  # 30 second timeout
         self.executor = ThreadPoolExecutor(max_workers=3)
-        self.searxng_client = searxng_client
 
         # Default model and parameters
         self.default_model = "gpt-oss-120b"  # Using the model from your configuration
@@ -515,8 +514,6 @@ CONCISENESS PRINCIPLES:
 Your response will be parsed by Telegram's HTML parser. Any invalid HTML will cause a system crash and error message to the user. You MUST generate only valid HTML using the 7 allowed tags. Follow the exact patterns shown in the training examples above. When in doubt, use plain text instead of risking invalid HTML.
 
 Above all, BE CONCISE AND DIRECT. Answer the user's question or fulfill their request as efficiently as possible without unnecessary elaboration.
-
-If you need current information, use the web search tool. Think to yourself "I need to search for [query]" and then use the search functionality.
 </final_meta_instruction>""",
                 }
             )

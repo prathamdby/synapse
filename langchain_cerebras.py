@@ -4,14 +4,9 @@ import logging
 from typing import Any, List, Mapping, Optional, Dict
 from langchain_core.language_models.llms import LLM
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
-from langchain_core.tools import Tool
-from langchain_core.runnables import RunnablePassthrough
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
 
 from pydantic import Field
 from cerebras_client import CerebrasClient
-from searxng_client import SearxngClient
 
 logger = logging.getLogger(__name__)
 
@@ -26,13 +21,9 @@ class CerebrasLLM(LLM):
     reasoning_effort: str = "medium"
     cerebras_client: Optional[CerebrasClient] = Field(default=None, exclude=True)
 
-    def __init__(
-        self, api_key: str = None, searxng_client: SearxngClient = None, **kwargs
-    ):
+    def __init__(self, api_key: str = None, **kwargs):
         super().__init__(**kwargs)
-        self.cerebras_client = CerebrasClient(
-            api_key=api_key, searxng_client=searxng_client
-        )
+        self.cerebras_client = CerebrasClient(api_key=api_key)
 
     @property
     def _llm_type(self) -> str:
@@ -139,68 +130,9 @@ class CerebrasLLM(LLM):
 class CerebrasChat:
     """Chat interface for Cerebras with conversation management."""
 
-    def __init__(self, api_key: str = None, searxng_client: SearxngClient = None):
-        self.cerebras_client = CerebrasClient(
-            api_key=api_key, searxng_client=searxng_client
-        )
-        self.llm = CerebrasLLM(api_key=api_key, searxng_client=searxng_client)
-        self.searxng_client = searxng_client
-        self.search_tool = self._create_search_tool() if searxng_client else None
-
-    def _create_search_tool(self) -> Optional[Tool]:
-        """Create search tool if SearXNG client is available."""
-        if not self.searxng_client:
-            return None
-
-        async def search_function(query: str) -> str:
-            """Search the web using SearXNG."""
-            try:
-                results = await self.searxng_client.search_with_summary(
-                    query=query, language="en", max_results=5
-                )
-
-                if not results or results["total_results"] == 0:
-                    return "No results found for the search query."
-
-                # Format results as a string
-                formatted_results = f"Search results for '{results['query']}':\n\n"
-                for i, result in enumerate(results["results"], 1):
-                    formatted_results += f"{i}. {result['title']}\n"
-                    formatted_results += f"   {result['content']}\n"
-                    formatted_results += f"   Source: {result['url']}\n\n"
-
-                return formatted_results
-            except Exception as e:
-                logger.error(f"Error during search: {e}")
-                return f"Error performing search: {str(e)}"
-
-        def sync_search_function(query: str) -> str:
-            """Synchronous wrapper for search function."""
-            import asyncio
-
-            try:
-                # Try to get the current event loop
-                loop = asyncio.get_event_loop()
-                # If we're in a running loop, create a task
-                if loop.is_running():
-                    # Create a new event loop in a separate thread
-                    import concurrent.futures
-
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(asyncio.run, search_function(query))
-                        return future.result()
-                else:
-                    # No event loop running, use asyncio.run
-                    return asyncio.run(search_function(query))
-            except RuntimeError:
-                # No event loop, use asyncio.run
-                return asyncio.run(search_function(query))
-
-        return Tool(
-            name="web_search",
-            description="Search the web for current information. Use this when you need to find up-to-date information. Input should be a search query.",
-            func=sync_search_function,
-        )
+    def __init__(self, api_key: str = None):
+        self.cerebras_client = CerebrasClient(api_key=api_key)
+        self.llm = CerebrasLLM(api_key=api_key)
 
     async def get_available_models(self) -> List[str]:
         """Get list of available Cerebras models."""
@@ -236,198 +168,3 @@ class CerebrasChat:
         except Exception as e:
             logger.error(f"Error in chat_with_history: {e}")
             return "🚫 <b>Processing Error</b>\n\nI encountered an issue while processing your message. This could be due to:\n• Temporary AI service disruption\n• Message too complex or long\n• Network connectivity issues\n\nPlease try:\n• Sending a shorter message\n• Rephrasing your question\n• Trying again in a minute\n\nIf the problem persists, consider using /reset to clear conversation history."
-
-    async def chat_with_search(
-        self,
-        message: str,
-        conversation_history: List[Dict[str, Any]],
-        system_prompt: str = None,
-        user_context: Dict[str, Any] = None,
-        model: str = None,
-    ) -> str:
-        """Chat with conversation history and search capability."""
-        try:
-            # If we have a search tool, first check if we need to search
-            if self.search_tool:
-                # Create a prompt to determine if we need to search
-                search_decision_prompt = ChatPromptTemplate.from_messages(
-                    [
-                        (
-                            "system",
-                            """<role>You are an intelligent search decision agent. Your sole task is to determine if a user's question requires current, real-time information.</role>
-
-<core_requirements>
-- Analyze the user's question for temporal indicators (current events, latest news, recent developments)
-- Determine if the information could be outdated in your training data
-- Respond ONLY with: 'SEARCH_NEEDED: [optimized search query]' or 'NO_SEARCH_NEEDED'
-- Keep search queries concise and specific
-</core_requirements>
-
-<search_indicators>
-Search is needed for:
-- Current events, news, or recent developments
-- Stock prices, market data, or financial information
-- Weather conditions or forecasts  
-- Sports scores, schedules, or recent results
-- Product releases, updates, or availability
-- Real-time data or statistics
-- Questions with words like: "latest", "current", "recent", "today", "now", "2024", "this year"
-
-Search is NOT needed for:
-- General knowledge or historical facts
-- Explanations of concepts or processes
-- How-to guides or tutorials
-- Programming or technical explanations
-- Theoretical or academic topics
-</search_indicators>
-
-<output_format>
-For search needed: SEARCH_NEEDED: [specific search terms]
-For no search: NO_SEARCH_NEEDED
-</output_format>""",
-                        ),
-                        ("human", "{input}"),
-                    ]
-                )
-
-                # Create chain to decide if search is needed
-                search_decision_chain = (
-                    search_decision_prompt | self.llm | StrOutputParser()
-                )
-
-                # Check if search is needed
-                decision = search_decision_chain.invoke({"input": message})
-
-                if decision.startswith("SEARCH_NEEDED:"):
-                    search_query = decision.replace("SEARCH_NEEDED:", "").strip()
-                    # Perform the search
-                    search_results = self.search_tool.func(search_query)
-
-                    # Create a prompt that includes the search results with HTML formatting instructions
-                    search_prompt = ChatPromptTemplate.from_messages(
-                        [
-                            (
-                                "system",
-                                """<role>You are Synapse, an expert AI assistant specializing in providing accurate, concise responses using search data. Your responses must be production-ready for Telegram.</role>
-
-<critical_system_failure_prevention>
-<telegram_html_compliance>
-    <allowed_tags_only>
-        <!-- Use ONLY these tags - others will crash the system -->
-        <b>text</b> or <strong>text</strong>  <!-- Bold text -->
-        <i>text</i> or <em>text</em>          <!-- Italic text -->
-        <u>text</u> or <ins>text</ins>        <!-- Underlined text -->
-        <s>text</s> or <del>text</del>        <!-- Strikethrough text -->
-        <code>text</code>                     <!-- Inline code -->
-        <pre>text</pre>                      <!-- Code blocks -->
-        <a href="url">text</a>               <!-- Links only -->
-        <blockquote>text</blockquote>        <!-- Quotes -->
-        <span class="tg-spoiler">text</span> <!-- Spoiler text -->
-    </allowed_tags_only>
-    <forbidden_tags>
-        <!-- NEVER use these - they will crash the system -->
-        - Empty tags: <> or < >
-        - Custom tags: <vec>, <string>, <div>, <span> (except tg-spoiler)
-        - Standard HTML: <h1>, <h2>, <ul>, <ol>, <li>, <br>, <p>
-        - Malformed or unclosed tags
-    </forbidden_tags>
-    <character_encoding>
-        <!-- Encode these characters always -->
-        - & must be &amp;
-        - < must be &lt; (unless part of allowed tag)
-        - > must be &gt; (unless part of allowed tag) 
-        - " must be &quot; in href attributes
-    </character_encoding>
-</telegram_html_compliance>
-<response_length_limit>
-    <!-- Hard limit: 4096 characters, stay under 4000 -->
-    <action>Verify response length before sending. Truncate if needed with "... (truncated)"</action>
-</response_length_limit>
-</critical_system_failure_prevention>
-
-<core_requirements>
-- **Objective:** Answer the user's question using search results with perfect accuracy
-- **Brevity:** Be direct and concise - no unnecessary elaboration
-- **Relevance:** Only include information that directly answers the question
-- **Source Attribution:** Reference sources when providing specific facts
-- **HTML Compliance:** Every tag must be from the allowed list above
-</core_requirements>
-
-<response_structure>
-<step_1_analyze>Extract the most relevant information from search results that directly answers the user's question</step_1_analyze>
-<step_2_synthesize>Combine information into a clear, structured response using proper HTML tags</step_2_synthesize>
-<step_3_verify>Check HTML compliance, character count (&lt;4000), and answer completeness</step_3_verify>
-</response_structure>
-
-<formatting_examples>
-<example_news_response>
-<b>Latest Update</b>
-
-The key developments are:
-
-• <b>Primary Event</b>: Brief description with specific details
-• <b>Impact</b>: <i>Significant changes</i> in the affected area
-• <b>Timeline</b>: Expected completion by <code>specific date</code>
-
-<a href="source_url">Source: Publication Name</a>
-</example_news_response>
-
-<example_data_response>
-<b>Current Data</b>
-
-<code>Metric Name</code>: <b>Value</b> (change from previous)
-
-Key insights:
-• Primary finding with <i>emphasis</i> on important aspects
-• Secondary finding with relevant context
-
-<i>Data as of: specific timestamp</i>
-</example_data_response>
-</formatting_examples>
-
-<mandatory_verification>
-Before responding, verify:
-1. **HTML Compliance**: Every tag is from allowed list, properly closed
-2. **Character Encoding**: &amp;, &lt;, &gt;, &quot; properly encoded  
-3. **Length Check**: Response under 4000 characters
-4. **Answer Quality**: Directly addresses user's question with search data
-5. **Source Attribution**: Credible sources referenced where appropriate
-</mandatory_verification>""",
-                            ),
-                            (
-                                "human",
-                                "Question: {question}\n\nSearch Results:\n{search_results}",
-                            ),
-                        ]
-                    )
-
-                    # Create chain with search results
-                    search_chain = search_prompt | self.llm | StrOutputParser()
-
-                    # Generate response using search results
-                    response = search_chain.invoke(
-                        {"question": message, "search_results": search_results}
-                    )
-
-                    return response
-                else:
-                    # No search needed, proceed with normal chat
-                    return await self.chat_with_history(
-                        message,
-                        conversation_history,
-                        system_prompt,
-                        user_context,
-                        model,
-                    )
-            else:
-                # Fallback to regular chat if no search tool
-                return await self.chat_with_history(
-                    message, conversation_history, system_prompt, user_context, model
-                )
-
-        except Exception as e:
-            logger.error(f"Error in chat_with_search: {e}")
-            # Fallback to regular chat
-            return await self.chat_with_history(
-                message, conversation_history, system_prompt, user_context, model
-            )
