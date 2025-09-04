@@ -37,6 +37,7 @@ from telegram.ext import (
 from database import DatabaseManager
 from cerebras_client import CerebrasClient
 from langchain_cerebras import CerebrasChat
+from mcp_manager import MCPManager
 
 # Load environment variables
 load_dotenv()
@@ -73,8 +74,14 @@ class TelegramBot:
 
         self.db = DatabaseManager(os.getenv("DATABASE_PATH", "./bot_database.db"))
 
-        # Initialize Cerebras chat client
-        self.cerebras_chat = CerebrasChat(api_key=os.getenv("CEREBRAS_API_KEY"))
+        # Initialize MCP Manager
+        mcp_config_path = os.getenv("MCP_CONFIG_PATH", "./mcp_config.json")
+        self.mcp_manager = MCPManager(config_path=mcp_config_path)
+
+        # Initialize Cerebras chat client with MCP integration
+        self.cerebras_chat = CerebrasChat(
+            api_key=os.getenv("CEREBRAS_API_KEY"), mcp_manager=self.mcp_manager
+        )
 
         # Rate limiting configuration
         self.rate_limit_messages = int(
@@ -163,6 +170,8 @@ class TelegramBot:
                 BotCommand("reset", "Clear conversation history"),
                 BotCommand("stats", "Show your usage statistics"),
                 BotCommand("model", "Switch AI models"),
+                BotCommand("mcp_status", "Show MCP server and tool status"),
+                BotCommand("mcp_reload", "Reload MCP configuration (admin only)"),
             ]
 
             # Define commands for group chats (includes all private commands plus group-specific ones)
@@ -172,6 +181,8 @@ class TelegramBot:
                 BotCommand("reset", "Clear conversation history"),
                 BotCommand("stats", "Show your usage statistics"),
                 BotCommand("model", "Switch AI models"),
+                BotCommand("mcp_status", "Show MCP server and tool status"),
+                BotCommand("mcp_reload", "Reload MCP configuration (admin only)"),
                 BotCommand("group_mode", "Change group memory mode (admin only)"),
                 BotCommand("group_settings", "View group settings (admin only)"),
                 BotCommand("group_reset", "Reset group conversations (admin only)"),
@@ -200,8 +211,34 @@ class TelegramBot:
             # The bot will still work, just without the menu
 
     async def initialize(self):
-        """Initialize the bot and database."""
+        """Initialize the bot, database, and MCP manager."""
+        # Initialize database
         await self.db.initialize_database()
+
+        # Initialize MCP manager and connect to servers
+        try:
+            await self.mcp_manager.load_config_and_connect()
+            system_status = self.mcp_manager.get_system_status()
+
+            if system_status.is_healthy:
+                logger.info(
+                    "MCP initialization successful",
+                    connected_servers=system_status.connected_servers,
+                    available_tools=system_status.available_tools,
+                )
+            else:
+                logger.warning(
+                    "MCP initialization completed with issues",
+                    connected_servers=system_status.connected_servers,
+                    total_servers=system_status.total_servers,
+                    errors=system_status.errors,
+                )
+        except Exception as e:
+            logger.error(
+                "MCP initialization failed, bot will work without MCP features",
+                error=str(e),
+            )
+
         logger.info("Bot initialized successfully")
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -255,6 +292,7 @@ Anyway... what's up? 🤷‍♂️
 • <code>/reset</code> - Wipe our chat clean
 • <code>/stats</code> - See how chatty you've been
 • <code>/model</code> - Switch AI models
+• <code>/mcp_status</code> - Check MCP tools and servers
 
 <b>Admin commands (if you're in charge):</b>
 • <code>/group_mode</code> - Shared memory vs personal memory
@@ -303,6 +341,7 @@ Questions? Just mention me and ask 🤷‍♂️
 • <code>/reset</code> - Forget everything we've talked about
 • <code>/stats</code> - See your usage stats
 • <code>/model</code> - Switch AI models
+• <code>/mcp_status</code> - Check MCP tools and servers
 
 <b>How to use me:</b>
 Just... talk to me? Like, send a message and I'll respond. That's it.
@@ -517,6 +556,212 @@ Your chat history's still there, just running on a different brain now.
             await query.edit_message_text(
                 "🚫 <b>Model Update Error</b>\n\nI couldn't update your preferred AI model. This could be due to:\n• Temporary database issues\n• Invalid model selection\n• Network connectivity problems\n\nPlease try:\n• Selecting the model again\n• Using /model to retry\n• Continuing with your current model\n\nIf the problem persists, your current model will continue to work.",
                 parse_mode=ParseMode.HTML,
+            )
+
+    async def mcp_status_command(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
+        """Handle /mcp_status command."""
+        try:
+            system_status = self.mcp_manager.get_system_status()
+            available_tools = self.mcp_manager.get_available_tools()
+
+            if system_status.total_servers == 0:
+                status_message = """
+🔧 <b>MCP Status</b>
+
+<b>Configuration:</b> No MCP servers configured
+<b>Status:</b> MCP features are disabled
+
+To enable MCP features:
+• Add server configurations to <code>mcp_config.json</code>
+• Restart the bot to load the configuration
+• Use <code>/help</code> to see available commands
+
+<i>MCP (Model Context Protocol) allows the bot to use external tools for enhanced functionality.</i>
+                """
+            else:
+                # Build server status list
+                server_statuses = []
+                for server_name, connection in self.mcp_manager.servers.items():
+                    health = self.mcp_manager.get_server_health(server_name)
+                    if connection.connected:
+                        status_emoji = "🟢"
+                        status_text = f"Connected ({len(connection.tools)} tools)"
+                    elif health and health.status.value == "connecting":
+                        status_emoji = "🟡"
+                        status_text = "Connecting..."
+                    elif health and health.status.value == "disabled":
+                        status_emoji = "⚪"
+                        status_text = "Disabled"
+                    else:
+                        status_emoji = "🔴"
+                        status_text = "Disconnected"
+                        if health and health.error_message:
+                            status_text += f" ({health.error_message[:50]}...)"
+
+                    server_statuses.append(
+                        f"• {status_emoji} <b>{server_name}</b>: {status_text}"
+                    )
+
+                # Build tool list
+                tool_list = []
+                if available_tools:
+                    for tool in available_tools[:10]:  # Limit to 10 tools for display
+                        server_status = (
+                            "🟢"
+                            if self.mcp_manager.servers.get(
+                                tool.server_name,
+                                type("obj", (object,), {"connected": False}),
+                            ).connected
+                            else "🔴"
+                        )
+                        tool_list.append(
+                            f"• {server_status} <code>{tool.name}</code> ({tool.server_name})"
+                        )
+
+                    if len(available_tools) > 10:
+                        tool_list.append(
+                            f"• <i>... and {len(available_tools) - 10} more tools</i>"
+                        )
+
+                status_message = f"""
+🔧 <b>MCP Status</b>
+
+<b>System Health:</b> {'🟢 Healthy' if system_status.is_healthy else '🟡 Issues detected'}
+
+<b>Servers ({system_status.connected_servers}/{system_status.total_servers} connected):</b>
+{chr(10).join(server_statuses) if server_statuses else '• No servers configured'}
+
+<b>Available Tools ({system_status.available_tools} total):</b>
+{chr(10).join(tool_list) if tool_list else '• No tools available'}
+
+<b>Connection Rate:</b> {system_status.connection_rate:.1f}%
+<b>Tool Availability:</b> {system_status.tool_availability_rate:.1f}%
+
+<i>Last updated: {system_status.last_update[:19] if system_status.last_update else 'Never'}</i>
+                """
+
+                if system_status.errors:
+                    error_list = []
+                    for error in system_status.errors[:3]:  # Show up to 3 errors
+                        error_list.append(f"• {error[:100]}...")
+
+                    if len(system_status.errors) > 3:
+                        error_list.append(
+                            f"• <i>... and {len(system_status.errors) - 3} more errors</i>"
+                        )
+
+                    status_message += f"""
+
+<b>Recent Errors:</b>
+{chr(10).join(error_list)}"""
+
+            await update.message.reply_text(
+                status_message,
+                parse_mode=ParseMode.HTML,
+                reply_parameters=ReplyParameters(message_id=update.message.message_id),
+            )
+
+        except Exception as e:
+            logger.error(f"Error in mcp_status_command: {e}")
+            await update.message.reply_text(
+                "🚫 <b>MCP Status Error</b>\n\nI couldn't retrieve MCP status information. This could be due to:\n• MCP manager initialization issues\n• Configuration problems\n• System errors\n\nPlease try again later or check the bot logs for details.",
+                parse_mode=ParseMode.HTML,
+                reply_parameters=ReplyParameters(message_id=update.message.message_id),
+            )
+
+    async def mcp_reload_command(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
+        """Handle /mcp_reload command (admin only)."""
+        user_id = update.effective_user.id
+
+        # Check if user is admin (you can customize this check)
+        admin_user_ids = os.getenv("ADMIN_USER_IDS", "").split(",")
+        admin_user_ids = [
+            int(uid.strip()) for uid in admin_user_ids if uid.strip().isdigit()
+        ]
+
+        if admin_user_ids and user_id not in admin_user_ids:
+            await update.message.reply_text(
+                "🚫 <b>Admin Only</b>\n\nOnly bot administrators can reload MCP configuration.",
+                parse_mode=ParseMode.HTML,
+                reply_parameters=ReplyParameters(message_id=update.message.message_id),
+            )
+            return
+
+        try:
+            await update.message.reply_text(
+                "🔄 <b>Reloading MCP Configuration...</b>\n\nThis may take a moment while I reconnect to servers.",
+                parse_mode=ParseMode.HTML,
+                reply_parameters=ReplyParameters(message_id=update.message.message_id),
+            )
+
+            # Reload MCP configuration
+            old_status = self.mcp_manager.get_system_status()
+            await self.mcp_manager.reload_config()
+            new_status = self.mcp_manager.get_system_status()
+
+            # Build reload summary
+            status_message = f"""
+🔄 <b>MCP Configuration Reloaded</b>
+
+<b>Before:</b>
+• Servers: {old_status.connected_servers}/{old_status.total_servers} connected
+• Tools: {old_status.available_tools} available
+
+<b>After:</b>
+• Servers: {new_status.connected_servers}/{new_status.total_servers} connected  
+• Tools: {new_status.available_tools} available
+
+<b>Status:</b> {'🟢 Healthy' if new_status.is_healthy else '🟡 Issues detected'}
+            """
+
+            if new_status.errors:
+                error_summary = []
+                for error in new_status.errors[:2]:
+                    error_summary.append(f"• {error[:80]}...")
+
+                if len(new_status.errors) > 2:
+                    error_summary.append(
+                        f"• <i>... and {len(new_status.errors) - 2} more</i>"
+                    )
+
+                status_message += f"""
+
+<b>Errors:</b>
+{chr(10).join(error_summary)}"""
+
+            status_message += f"""
+
+<i>Use /mcp_status for detailed information</i>"""
+
+            await update.message.reply_text(
+                status_message,
+                parse_mode=ParseMode.HTML,
+                reply_parameters=ReplyParameters(message_id=update.message.message_id),
+            )
+
+            logger.info(
+                "MCP configuration reloaded by admin",
+                user_id=user_id,
+                old_servers=old_status.total_servers,
+                new_servers=new_status.total_servers,
+                old_tools=old_status.available_tools,
+                new_tools=new_status.available_tools,
+            )
+
+        except Exception as e:
+            error_msg = f"MCP reload failed: {str(e)}"
+            logger.error(
+                "Error reloading MCP configuration", error=error_msg, user_id=user_id
+            )
+
+            await update.message.reply_text(
+                f"🚫 <b>MCP Reload Failed</b>\n\n{error_msg}\n\nPlease check the configuration file and try again. Use /mcp_status to see current status.",
+                parse_mode=ParseMode.HTML,
+                reply_parameters=ReplyParameters(message_id=update.message.message_id),
             )
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1396,6 +1641,8 @@ Choose a different model to switch your AI experience:
         application.add_handler(CommandHandler("clear", self.reset_command))
         application.add_handler(CommandHandler("stats", self.stats_command))
         application.add_handler(CommandHandler("model", self.model_command))
+        application.add_handler(CommandHandler("mcp_status", self.mcp_status_command))
+        application.add_handler(CommandHandler("mcp_reload", self.mcp_reload_command))
 
         # Group commands
         application.add_handler(CommandHandler("group_mode", self.group_mode_command))
@@ -1457,6 +1704,12 @@ Choose a different model to switch your AI experience:
             await application.updater.stop()
             await application.stop()
             await application.shutdown()
+
+            # Shutdown MCP manager
+            try:
+                await self.mcp_manager.shutdown()
+            except Exception as e:
+                logger.error("Error shutting down MCP manager", error=str(e))
 
 
 async def main():

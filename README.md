@@ -15,6 +15,11 @@ A sophisticated Telegram bot powered by Cerebras AI that delivers intelligent co
 - **🏢 Group Support**: Full-featured group chat support with admin controls
 - **🧵 Thread Management**: Support for forum topics and reply chains
 - **⚙️ Configurable**: Flexible group settings and mention policies
+- **🔧 MCP Integration**: External tool support via Model Context Protocol
+- **🌐 Web Fetching**: Retrieve and analyze web content
+- **📁 File Operations**: Read and process files from the filesystem
+- **🔄 Git Integration**: Repository operations and version control
+- **🛠️ Extensible Tools**: Easy addition of new MCP servers and capabilities
 
 ## 🚀 Quick Start
 
@@ -22,6 +27,7 @@ A sophisticated Telegram bot powered by Cerebras AI that delivers intelligent co
 
 - [Telegram Bot Token](https://t.me/botfather)
 - [Cerebras API Key](https://cloud.cerebras.ai/)
+- [UV Package Manager](https://docs.astral.sh/uv/) (for MCP server installation)
 
 Choose your preferred deployment method:
 
@@ -107,6 +113,10 @@ GROUP_MAX_CONTEXT=40
 DEFAULT_GROUP_RATE_LIMIT=50
 DEFAULT_USER_RATE_LIMIT_IN_GROUPS=10
 
+# MCP Integration (optional)
+MCP_CONFIG_PATH=./mcp_config.json
+ADMIN_USER_IDS=123456789,987654321  # Comma-separated list for MCP admin commands
+
 ```
 
 **Note**: For Docker deployment, use `/app/data/bot_database.db` to ensure data persists across container rebuilds.
@@ -125,6 +135,7 @@ DEFAULT_USER_RATE_LIMIT_IN_GROUPS=10
 - `/reset` or `/clear` - Clear conversation history
 - `/stats` - View usage statistics and preferences
 - `/model` - Switch between available AI models
+- `/mcp_status` - View MCP server and tool status
 
 ### Group Commands (Admin Only)
 
@@ -132,6 +143,167 @@ DEFAULT_USER_RATE_LIMIT_IN_GROUPS=10
 - `/group_settings` - View all group configuration options
 - `/group_reset` - Clear group conversation history
 - `/group_stats` - View group statistics and activity
+
+### Admin Commands
+
+- `/mcp_reload` - Reload MCP configuration without restart (admin only)
+
+## 🔧 MCP Integration Setup
+
+### What is MCP?
+
+Model Context Protocol (MCP) allows the bot to use external tools and services to enhance responses with real-time data and functionality. The bot can automatically detect when tools might be helpful and use them seamlessly.
+
+### Installing MCP Servers
+
+Install MCP servers using UV (they run as separate processes):
+
+```bash
+# Web content fetching
+uvx mcp-server-fetch
+
+# Search integration (requires SearXNG URL)
+npx -y mcp-searxng
+
+# File system operations
+uvx mcp-server-filesystem
+
+# Git repository operations
+uvx mcp-server-git
+```
+
+### MCP Configuration
+
+Create or edit `mcp_config.json` in your project root:
+
+```json
+{
+  "servers": {
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "enabled": true
+    },
+    "filesystem": {
+      "command": "uvx",
+      "args": ["mcp-server-filesystem", "/tmp"],
+      "enabled": true
+    },
+    "git": {
+      "command": "uvx",
+      "args": ["mcp-server-git", "--repository", "/path/to/repo"],
+      "enabled": false
+    }
+  }
+}
+```
+
+### Configuration Options
+
+- **command**: Executable to run the MCP server
+- **args**: Arguments passed to the server command
+- **enabled**: Whether this server should be started (true/false)
+- **env**: Environment variables to pass to the server (optional)
+
+### Available MCP Servers
+
+#### Web Fetching (`mcp-server-fetch`)
+
+- Retrieves web page content
+- Analyzes URLs mentioned in conversations
+- Downloads and processes web resources
+
+#### File System (`mcp-server-filesystem`)
+
+- Reads files from specified directories
+- Processes file contents for analysis
+- Supports various file formats
+
+#### Git Operations (`mcp-server-git`)
+
+- Repository status and information
+- Commit history and branch details
+- File change tracking
+
+#### Search Integration (`mcp-searxng`)
+
+- Web search through SearXNG instances
+- Configurable search endpoints
+- Real-time web search capabilities
+
+### Tool Usage Examples
+
+The bot automatically detects when to use tools:
+
+**Web Content**: "What's on this page: https://example.com"
+
+- Bot uses fetch tool to retrieve page content
+- Analyzes and summarizes the content
+
+**File Operations**: "Read the file /tmp/config.txt"
+
+- Bot uses filesystem tool to read the file
+- Processes and explains the content
+
+**Git Information**: "What's the status of the repository?"
+
+- Bot uses git tool to check repository status
+- Reports on branches, commits, and changes
+
+### MCP Management Commands
+
+- **`/mcp_status`**: View all servers and tools status
+- **`/mcp_reload`**: Reload configuration (admin only)
+
+### Environment Variables in Configuration
+
+MCP configurations support environment variable substitution using the `!VARIABLE_NAME` syntax:
+
+```json
+{
+  "servers": {
+    "searxng": {
+      "command": "npx",
+      "args": ["-y", "mcp-searxng"],
+      "env": {
+        "SEARXNG_URL": "!SEARXNG_BASE_URL",
+        "API_KEY": "!MY_API_KEY"
+      },
+      "enabled": true
+    }
+  }
+}
+```
+
+**Features:**
+
+- **Direct substitution**: `"!VAR_NAME"` → value of `VAR_NAME` environment variable
+- **Inline substitution**: `"https://!HOST:!PORT/api"` → `"https://localhost:8080/api"`
+- **Fallback behavior**: If environment variable not found, original value is kept
+- **Automatic logging**: Warns when environment variables are missing
+
+**Environment Variable Setup:**
+
+```bash
+# Add to your .env file
+SEARXNG_BASE_URL=https://search.example.com
+MY_API_KEY=your-secret-key-here
+```
+
+### Troubleshooting MCP
+
+1. **Check server status**: Use `/mcp_status` to see connection status
+2. **Verify installation**: Ensure MCP servers are installed with `uvx`
+3. **Configuration errors**: Check JSON syntax in `mcp_config.json`
+4. **Permissions**: Ensure servers have access to required directories/repositories
+5. **Reload config**: Use `/mcp_reload` after configuration changes
+
+### Security Considerations
+
+- **File Access**: Limit filesystem server to safe directories only
+- **Repository Access**: Ensure git server has appropriate repository permissions
+- **Admin Controls**: Only authorized users can reload MCP configuration
+- **Tool Filtering**: Bot intelligently selects appropriate tools for requests
 
 ## 🏗️ Architecture
 
@@ -141,6 +313,10 @@ synapse/
 ├── database.py            # SQLite database management
 ├── cerebras_client.py     # Cerebras AI API client with async support
 ├── langchain_cerebras.py  # LangChain wrapper for Cerebras integration
+├── mcp_manager.py         # MCP server connection and tool management
+├── mcp_models.py          # Data models for MCP components
+├── mcp_config_loader.py   # JSON configuration loading and validation
+├── mcp_config.json        # MCP server configuration
 ├── pyproject.toml         # Project configuration and dependencies
 └── README.md              # Documentation
 ```
@@ -151,6 +327,8 @@ synapse/
 - **DatabaseManager**: Persistent storage for users and conversations
 - **CerebrasClient**: Async API client for Cerebras AI models
 - **CerebrasLLM**: LangChain integration for advanced workflows
+- **MCPManager**: Manages multiple MCP server connections and tool execution
+- **MCPConfigLoader**: Loads and validates JSON configuration for MCP servers
 
 ## 🔧 Development
 
