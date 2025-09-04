@@ -5,3 +5,9 @@ services:
     env_file: .env
     volumes:
       - ./data:/app/data
+      - ./mcp_config.json:/app/mcp_config.json
+    environment:
+      # Ensure Node.js and npm are available in PATH
+      - PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
+      # Set npm cache directory to avoid permission issues
+      - NPM_CONFIG_CACHE=/tmp/.npm

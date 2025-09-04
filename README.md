@@ -50,15 +50,27 @@ Choose your preferred deployment method:
 
    ```bash
    cp .env.example .env
-   # Edit .env with your API tokens
+   # Edit .env with your API tokens and MCP settings
    ```
 
-3. **Run with Docker Compose**
+3. **Configure MCP servers (optional)**
+
+   ```bash
+   # Edit mcp_config.json to configure your MCP servers
+   # Example: Set SEARXNG_BASE_URL in .env for search functionality
+   ```
+
+4. **Run with Docker Compose**
    ```bash
    docker-compose up -d
    ```
 
-The bot will automatically start and data will persist in the `./data` directory.
+The bot will automatically start with:
+
+- Data persistence in the `./data` directory
+- MCP configuration from `./mcp_config.json`
+- Node.js and npm available for MCP servers
+- Pre-installed `mcp-searxng` package
 
 ### Option 2: Manual Installation
 
@@ -66,6 +78,7 @@ The bot will automatically start and data will persist in the `./data` directory
 
 - Python 3.11+
 - UV package manager
+- Node.js 18+ and npm (for MCP servers like searxng)
 
 **Steps:**
 
@@ -84,7 +97,15 @@ The bot will automatically start and data will persist in the `./data` directory
    # Edit .env with your API tokens
    ```
 
-3. **Run the bot**
+3. **Install Node.js MCP servers (optional)**
+
+   ```bash
+   # Install MCP servers that require Node.js
+   npm install -g mcp-searxng
+   # Add other npm-based MCP servers as needed
+   ```
+
+4. **Run the bot**
    ```bash
    uv run main.py
    ```
@@ -293,10 +314,12 @@ MY_API_KEY=your-secret-key-here
 ### Troubleshooting MCP
 
 1. **Check server status**: Use `/mcp_status` to see connection status
-2. **Verify installation**: Ensure MCP servers are installed with `uvx`
+2. **Verify installation**: Ensure MCP servers are installed with `uvx` or `npm`
 3. **Configuration errors**: Check JSON syntax in `mcp_config.json`
-4. **Permissions**: Ensure servers have access to required directories/repositories
-5. **Reload config**: Use `/mcp_reload` after configuration changes
+4. **Environment variables**: Verify all `!VARIABLE_NAME` references have corresponding values in `.env`
+5. **Docker environment**: Node.js and npm are pre-installed in Docker containers
+6. **Permissions**: Ensure servers have access to required directories/repositories
+7. **Reload config**: Use `/mcp_reload` after configuration changes
 
 ### Security Considerations
 

@@ -195,13 +195,11 @@ class MCPManager:
             # Create server parameters
             server_params = StdioServerParameters(command=command, args=args, env=env)
 
-            # Connect using thread pool (MCP client is synchronous)
-            loop = asyncio.get_event_loop()
-            session = await loop.run_in_executor(
-                self.executor, self._sync_connect_server, server_params
-            )
+            # Connect using async MCP client
+            connection_result = await self._async_connect_server(server_params)
 
-            if session:
+            if connection_result:
+                session, read_stream, write_stream = connection_result
                 # Create server connection object
                 connection = MCPServerConnection(
                     name=server_name,
@@ -249,6 +247,34 @@ class MCPManager:
             self.system_status.add_error(f"{server_name}: {error_msg}")
             return False
 
+    async def _async_connect_server(
+        self, server_params: StdioServerParameters
+    ) -> Optional[tuple]:
+        """
+        Asynchronously connect to MCP server.
+
+        Args:
+            server_params: Server parameters for connection
+
+        Returns:
+            Tuple of (session, read_stream, write_stream) if successful, None otherwise
+        """
+        try:
+            # Use the MCP stdio_client function
+            read_stream, write_stream = stdio_client(server_params)
+
+            # Create a client session from the streams
+            session = ClientSession(read_stream, write_stream)
+
+            # Initialize the session
+            await session.initialize()
+
+            # Return both session and streams so we can manage lifecycle
+            return (session, read_stream, write_stream)
+        except Exception as e:
+            logger.error("Async connection failed", error=str(e))
+            return None
+
     def _sync_connect_server(
         self, server_params: StdioServerParameters
     ) -> Optional[ClientSession]:
@@ -262,10 +288,11 @@ class MCPManager:
             ClientSession if successful, None otherwise
         """
         try:
-            # This is a simplified synchronous connection
-            # In a real implementation, you would use the actual MCP client
-            session = stdio_client(server_params)
-            return session
+            # This method should not be called synchronously
+            # The actual connection needs to be done asynchronously
+            # For now, return None to indicate failure
+            logger.error("Synchronous connection not supported - use async connection")
+            return None
         except Exception as e:
             logger.error("Sync connection failed", error=str(e))
             return None
@@ -297,11 +324,8 @@ class MCPManager:
         try:
             logger.debug("Discovering tools from server", server_name=server_name)
 
-            # Use thread pool for synchronous MCP operations
-            loop = asyncio.get_event_loop()
-            tools_data = await loop.run_in_executor(
-                self.executor, self._sync_discover_tools, connection.session
-            )
+            # Use async MCP operations
+            tools_data = await self._async_discover_tools(connection.session)
 
             if tools_data:
                 # Process discovered tools
@@ -360,6 +384,46 @@ class MCPManager:
 
             return []
 
+    async def _async_discover_tools(
+        self, session: ClientSession
+    ) -> Optional[List[Dict]]:
+        """
+        Asynchronously discover tools from MCP server.
+
+        Args:
+            session: MCP client session
+
+        Returns:
+            List of tool dictionaries or None if failed
+        """
+        try:
+            # Call the actual MCP session to list tools
+            tools_response = await session.list_tools()
+
+            if hasattr(tools_response, "tools"):
+                tools_list = []
+                for tool in tools_response.tools:
+                    tool_dict = {
+                        "name": tool.name,
+                        "description": tool.description or "No description available",
+                        "schema": (
+                            tool.inputSchema.model_dump()
+                            if hasattr(tool, "inputSchema") and tool.inputSchema
+                            else {}
+                        ),
+                    }
+                    tools_list.append(tool_dict)
+
+                logger.debug(f"Discovered {len(tools_list)} tools from MCP server")
+                return tools_list
+            else:
+                logger.warning("MCP server returned no tools")
+                return []
+
+        except Exception as e:
+            logger.error("Async tool discovery failed", error=str(e))
+            return None
+
     def _sync_discover_tools(self, session: ClientSession) -> Optional[List[Dict]]:
         """
         Synchronously discover tools (runs in thread pool).
@@ -371,16 +435,29 @@ class MCPManager:
             List of tool dictionaries or None if failed
         """
         try:
-            # This is a simplified tool discovery
-            # In a real implementation, you would call session.list_tools()
-            # For now, return mock data
-            return [
-                {
-                    "name": "example_tool",
-                    "description": "Example tool for testing",
-                    "schema": {},
-                }
-            ]
+            # Call the actual MCP session to list tools
+            tools_response = session.list_tools()
+
+            if hasattr(tools_response, "tools"):
+                tools_list = []
+                for tool in tools_response.tools:
+                    tool_dict = {
+                        "name": tool.name,
+                        "description": tool.description or "No description available",
+                        "schema": (
+                            tool.inputSchema.model_dump()
+                            if hasattr(tool, "inputSchema") and tool.inputSchema
+                            else {}
+                        ),
+                    }
+                    tools_list.append(tool_dict)
+
+                logger.debug(f"Discovered {len(tools_list)} tools from MCP server")
+                return tools_list
+            else:
+                logger.warning("MCP server returned no tools")
+                return []
+
         except Exception as e:
             logger.error("Sync tool discovery failed", error=str(e))
             return None
@@ -455,12 +532,9 @@ class MCPManager:
                 arguments=arguments,
             )
 
-            # Execute tool using thread pool
-            loop = asyncio.get_event_loop()
+            # Execute tool using async MCP
             result = await asyncio.wait_for(
-                loop.run_in_executor(
-                    self.executor,
-                    self._sync_execute_tool,
+                self._async_execute_tool(
                     server_connection.session,
                     tool.name,
                     arguments,
@@ -538,6 +612,58 @@ class MCPManager:
                 execution_time=execution_time,
             )
 
+    async def _async_execute_tool(
+        self, session: ClientSession, tool_name: str, arguments: Dict
+    ) -> Any:
+        """
+        Asynchronously execute tool.
+
+        Args:
+            session: MCP client session
+            tool_name: Name of the tool
+            arguments: Tool arguments
+
+        Returns:
+            Tool execution result
+        """
+        try:
+            # Call the actual MCP session to execute the tool
+            result = await session.call_tool(tool_name, arguments)
+
+            # Extract the content from the result
+            if hasattr(result, "content") and result.content:
+                if isinstance(result.content, list) and len(result.content) > 0:
+                    # Handle multiple content items
+                    content_parts = []
+                    for item in result.content:
+                        if hasattr(item, "text"):
+                            content_parts.append(item.text)
+                        elif hasattr(item, "data"):
+                            content_parts.append(str(item.data))
+                        else:
+                            content_parts.append(str(item))
+                    return "\n".join(content_parts)
+                else:
+                    # Handle single content item
+                    content = (
+                        result.content[0]
+                        if isinstance(result.content, list)
+                        else result.content
+                    )
+                    if hasattr(content, "text"):
+                        return content.text
+                    elif hasattr(content, "data"):
+                        return str(content.data)
+                    else:
+                        return str(content)
+            else:
+                # Fallback to string representation
+                return str(result)
+
+        except Exception as e:
+            logger.error("Async tool execution failed", error=str(e))
+            raise
+
     def _sync_execute_tool(
         self, session: ClientSession, tool_name: str, arguments: Dict
     ) -> Any:
@@ -553,9 +679,39 @@ class MCPManager:
             Tool execution result
         """
         try:
-            # This is a simplified tool execution
-            # In a real implementation, you would call session.call_tool()
-            return f"Mock result for {tool_name} with args {arguments}"
+            # Call the actual MCP session to execute the tool
+            result = session.call_tool(tool_name, arguments)
+
+            # Extract the content from the result
+            if hasattr(result, "content") and result.content:
+                if isinstance(result.content, list) and len(result.content) > 0:
+                    # Handle multiple content items
+                    content_parts = []
+                    for item in result.content:
+                        if hasattr(item, "text"):
+                            content_parts.append(item.text)
+                        elif hasattr(item, "data"):
+                            content_parts.append(str(item.data))
+                        else:
+                            content_parts.append(str(item))
+                    return "\n".join(content_parts)
+                else:
+                    # Handle single content item
+                    content = (
+                        result.content[0]
+                        if isinstance(result.content, list)
+                        else result.content
+                    )
+                    if hasattr(content, "text"):
+                        return content.text
+                    elif hasattr(content, "data"):
+                        return str(content.data)
+                    else:
+                        return str(content)
+            else:
+                # Fallback to string representation
+                return str(result)
+
         except Exception as e:
             logger.error("Sync tool execution failed", error=str(e))
             raise
