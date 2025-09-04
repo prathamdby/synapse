@@ -259,6 +259,12 @@ class MCPConfigLoader:
                     "command": "uvx",
                     "args": ["mcp-server-fetch"],
                     "enabled": True,
+                },
+                "searxng": {
+                    "command": "npx",
+                    "args": ["-y", "mcp-searxng"],
+                    "env": {"SEARXNG_URL": "!SEARXNG_BASE_URL"},
+                    "enabled": True,
                 }
             }
         }

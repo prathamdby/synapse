@@ -199,27 +199,23 @@ class MCPManager:
             connection_result = await self._async_connect_server(server_params)
 
             if connection_result:
-                session = connection_result["session"]
-                context_manager = connection_result["context_manager"]
+                server_params = connection_result["server_params"]
                 tools_result = connection_result["tools_result"]
 
-                # Create server connection object
+                # Create server connection object (without storing actual session)
                 connection = MCPServerConnection(
                     name=server_name,
-                    session=session,
+                    session=server_params,  # Store params instead of session
                     connected=True,
                     tools={},
                     command=command,
                     args=args,
                     enabled=True,
-                    context_manager=context_manager,
-                    read_stream=connection_result["read_stream"],
-                    write_stream=connection_result["write_stream"],
                 )
 
                 self.servers[server_name] = connection
 
-                # Process tools discovered during connection
+                # Process tools discovered during connection test
                 if hasattr(tools_result, "tools"):
                     for tool in tools_result.tools:
                         mcp_tool = MCPTool(
@@ -293,43 +289,36 @@ class MCPManager:
         self, server_params: StdioServerParameters
     ) -> Optional[Dict[str, Any]]:
         """
-        Asynchronously connect to MCP server.
+        Asynchronously test connection to MCP server and discover tools.
 
         Args:
             server_params: Server parameters for connection
 
         Returns:
-            Dictionary with connection details if successful, None otherwise
+            Dictionary with connection test results if successful, None otherwise
         """
         try:
-            # Store the context manager for later use
-            context_manager = stdio_client(server_params)
+            logger.debug("Testing MCP server connection")
 
-            # Enter the context manager to get streams
-            streams = await context_manager.__aenter__()
-            read_stream, write_stream = streams
+            # Test connection with a short-lived session (using official pattern)
+            async with stdio_client(server_params) as (read, write):
+                async with ClientSession(read, write) as session:
+                    # Initialize the session
+                    await session.initialize()
 
-            # Create a client session from the streams
-            session = ClientSession(read_stream, write_stream)
+                    # Test the connection by listing tools
+                    tools_result = await session.list_tools()
 
-            # Initialize the session
-            await session.initialize()
+                    logger.debug("MCP server connection test successful")
 
-            # Test the connection by listing tools
-            tools_result = await session.list_tools()
-
-            logger.debug("MCP server connection established successfully")
-
-            # Return connection details
-            return {
-                "session": session,
-                "context_manager": context_manager,
-                "read_stream": read_stream,
-                "write_stream": write_stream,
-                "tools_result": tools_result,
-            }
+                    # Return test results (not the actual session)
+                    return {
+                        "server_params": server_params,
+                        "tools_result": tools_result,
+                        "connection_successful": True,
+                    }
         except Exception as e:
-            logger.error("Async connection failed", error=str(e))
+            logger.error("MCP server connection test failed", error=str(e))
             return None
 
     def _sync_connect_server(
@@ -589,10 +578,10 @@ class MCPManager:
                 arguments=arguments,
             )
 
-            # Execute tool using async MCP
+            # Execute tool using async MCP with fresh session
             result = await asyncio.wait_for(
                 self._async_execute_tool(
-                    server_connection.session,
+                    server_connection.session,  # This is now server_params
                     tool.name,
                     arguments,
                 ),
@@ -670,13 +659,13 @@ class MCPManager:
             )
 
     async def _async_execute_tool(
-        self, session: ClientSession, tool_name: str, arguments: Dict
+        self, server_params: StdioServerParameters, tool_name: str, arguments: Dict
     ) -> Any:
         """
-        Asynchronously execute tool.
+        Asynchronously execute tool with fresh session.
 
         Args:
-            session: MCP client session
+            server_params: Server parameters for creating fresh connection
             tool_name: Name of the tool
             arguments: Tool arguments
 
@@ -684,38 +673,40 @@ class MCPManager:
             Tool execution result
         """
         try:
-            # Call the actual MCP session to execute the tool
-            result = await session.call_tool(tool_name, arguments)
+            # Create a fresh session for tool execution (using official pattern)
+            async with stdio_client(server_params) as (read, write):
+                async with ClientSession(read, write) as session:
+                    # Initialize the session
+                    await session.initialize()
 
-            # Extract the content from the result
-            if hasattr(result, "content") and result.content:
-                if isinstance(result.content, list) and len(result.content) > 0:
-                    # Handle multiple content items
-                    content_parts = []
-                    for item in result.content:
-                        if hasattr(item, "text"):
-                            content_parts.append(item.text)
-                        elif hasattr(item, "data"):
-                            content_parts.append(str(item.data))
+                    # Call the actual MCP session to execute the tool
+                    result = await session.call_tool(tool_name, arguments)
+
+                    # Extract the content from the result (following test pattern)
+                    if hasattr(result, "content") and result.content:
+                        if isinstance(result.content, list) and len(result.content) > 0:
+                            # Handle multiple content items
+                            content_parts = []
+                            for item in result.content:
+                                if hasattr(item, "text"):
+                                    content_parts.append(item.text)
+                                else:
+                                    content_parts.append(str(item))
+                            return "\n".join(content_parts)
                         else:
-                            content_parts.append(str(item))
-                    return "\n".join(content_parts)
-                else:
-                    # Handle single content item
-                    content = (
-                        result.content[0]
-                        if isinstance(result.content, list)
-                        else result.content
-                    )
-                    if hasattr(content, "text"):
-                        return content.text
-                    elif hasattr(content, "data"):
-                        return str(content.data)
+                            # Handle single content item
+                            first_content = (
+                                result.content[0]
+                                if isinstance(result.content, list)
+                                else result.content
+                            )
+                            if hasattr(first_content, "text"):
+                                return first_content.text
+                            else:
+                                return str(first_content)
                     else:
-                        return str(content)
-            else:
-                # Fallback to string representation
-                return str(result)
+                        # Fallback to string representation
+                        return str(result)
 
         except Exception as e:
             logger.error("Async tool execution failed", error=str(e))
@@ -920,14 +911,7 @@ class MCPManager:
         try:
             connection = self.servers.get(server_name)
             if connection:
-                # Close the context manager if it exists
-                if connection.context_manager:
-                    try:
-                        await connection.context_manager.__aexit__(None, None, None)
-                    except Exception as e:
-                        logger.warning(f"Error closing context manager: {e}")
-
-                # Mark as disconnected
+                # Mark as disconnected (no persistent connections to close)
                 connection.connected = False
 
             logger.info("Disconnected from MCP server", server_name=server_name)

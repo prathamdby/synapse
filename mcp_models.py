@@ -140,8 +140,8 @@ class MCPManagerConfig:
     """Configuration for the MCP Manager."""
 
     config_path: str = "mcp_config.json"
-    connection_timeout: float = 30.0
-    tool_execution_timeout: float = 60.0
+    connection_timeout: float = 60.0  # Increased timeout for slower servers
+    tool_execution_timeout: float = 30.0
     max_retries: int = 3
     retry_delay: float = 1.0
     health_check_interval: float = 300.0  # 5 minutes
