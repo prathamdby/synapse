@@ -199,7 +199,10 @@ class MCPManager:
             connection_result = await self._async_connect_server(server_params)
 
             if connection_result:
-                session, read_stream, write_stream = connection_result
+                session = connection_result["session"]
+                context_manager = connection_result["context_manager"]
+                tools_result = connection_result["tools_result"]
+
                 # Create server connection object
                 connection = MCPServerConnection(
                     name=server_name,
@@ -209,9 +212,45 @@ class MCPManager:
                     command=command,
                     args=args,
                     enabled=True,
+                    context_manager=context_manager,
+                    read_stream=connection_result["read_stream"],
+                    write_stream=connection_result["write_stream"],
                 )
 
                 self.servers[server_name] = connection
+
+                # Process tools discovered during connection
+                if hasattr(tools_result, "tools"):
+                    for tool in tools_result.tools:
+                        mcp_tool = MCPTool(
+                            name=tool.name,
+                            description=tool.description or "No description available",
+                            server_name=server_name,
+                            full_name=f"{server_name}.{tool.name}",
+                            schema=(
+                                tool.inputSchema.model_dump()
+                                if hasattr(tool, "inputSchema") and tool.inputSchema
+                                else {}
+                            ),
+                        )
+
+                        # Handle tool name conflicts
+                        if mcp_tool.name in self.available_tools:
+                            # Use full name for conflicts
+                            existing_tool = self.available_tools[mcp_tool.name]
+                            logger.warning(
+                                "Tool name conflict detected",
+                                tool_name=mcp_tool.name,
+                                existing_server=existing_tool.server_name,
+                                new_server=server_name,
+                            )
+                            # Store with full name
+                            self.available_tools[mcp_tool.full_name] = mcp_tool
+                            connection.tools[mcp_tool.full_name] = mcp_tool
+                        else:
+                            # Store with simple name
+                            self.available_tools[mcp_tool.name] = mcp_tool
+                            connection.tools[mcp_tool.name] = mcp_tool
 
                 # Update health status
                 self.server_health[server_name] = ServerHealth(
@@ -219,10 +258,13 @@ class MCPManager:
                     status=ServerStatus.CONNECTED,
                     last_check=datetime.now().isoformat(),
                     uptime=time.time(),
+                    tool_count=len(connection.tools),
                 )
 
                 logger.info(
-                    "Successfully connected to MCP server", server_name=server_name
+                    "Successfully connected to MCP server",
+                    server_name=server_name,
+                    tool_count=len(connection.tools),
                 )
                 return True
             else:
@@ -249,7 +291,7 @@ class MCPManager:
 
     async def _async_connect_server(
         self, server_params: StdioServerParameters
-    ) -> Optional[tuple]:
+    ) -> Optional[Dict[str, Any]]:
         """
         Asynchronously connect to MCP server.
 
@@ -257,11 +299,15 @@ class MCPManager:
             server_params: Server parameters for connection
 
         Returns:
-            Tuple of (session, read_stream, write_stream) if successful, None otherwise
+            Dictionary with connection details if successful, None otherwise
         """
         try:
-            # Use the MCP stdio_client function
-            read_stream, write_stream = stdio_client(server_params)
+            # Store the context manager for later use
+            context_manager = stdio_client(server_params)
+
+            # Enter the context manager to get streams
+            streams = await context_manager.__aenter__()
+            read_stream, write_stream = streams
 
             # Create a client session from the streams
             session = ClientSession(read_stream, write_stream)
@@ -269,8 +315,19 @@ class MCPManager:
             # Initialize the session
             await session.initialize()
 
-            # Return both session and streams so we can manage lifecycle
-            return (session, read_stream, write_stream)
+            # Test the connection by listing tools
+            tools_result = await session.list_tools()
+
+            logger.debug("MCP server connection established successfully")
+
+            # Return connection details
+            return {
+                "session": session,
+                "context_manager": context_manager,
+                "read_stream": read_stream,
+                "write_stream": write_stream,
+                "tools_result": tools_result,
+            }
         except Exception as e:
             logger.error("Async connection failed", error=str(e))
             return None
@@ -862,9 +919,15 @@ class MCPManager:
         """Disconnect from a specific server."""
         try:
             connection = self.servers.get(server_name)
-            if connection and connection.session:
-                # In a real implementation, you would properly close the session
-                # For now, just mark as disconnected
+            if connection:
+                # Close the context manager if it exists
+                if connection.context_manager:
+                    try:
+                        await connection.context_manager.__aexit__(None, None, None)
+                    except Exception as e:
+                        logger.warning(f"Error closing context manager: {e}")
+
+                # Mark as disconnected
                 connection.connected = False
 
             logger.info("Disconnected from MCP server", server_name=server_name)

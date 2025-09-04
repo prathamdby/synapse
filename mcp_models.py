@@ -32,6 +32,9 @@ class MCPServerConnection:
     command: str
     args: List[str]
     enabled: bool = True
+    context_manager: Any = None  # Store the async context manager
+    read_stream: Any = None
+    write_stream: Any = None
 
     def __post_init__(self):
         """Initialize tools dict if not provided."""
