@@ -133,8 +133,7 @@ class MCPManager:
                         if not task.done():
                             task.cancel()
 
-            # Discover tools from all connected servers
-            await self._discover_all_tools()
+            # Tools are already discovered during connection, no need to rediscover
 
             # Update system status
             self._update_system_status()
@@ -224,7 +223,7 @@ class MCPManager:
                             server_name=server_name,
                             full_name=f"{server_name}.{tool.name}",
                             schema=(
-                                tool.inputSchema.model_dump()
+                                tool.inputSchema
                                 if hasattr(tool, "inputSchema") and tool.inputSchema
                                 else {}
                             ),
@@ -343,92 +342,7 @@ class MCPManager:
             logger.error("Sync connection failed", error=str(e))
             return None
 
-    async def discover_tools_from_server(self, server_name: str) -> List[Dict]:
-        """
-        Discover available tools from a specific MCP server.
-
-        Args:
-            server_name: Name of the server to discover tools from
-
-        Returns:
-            List of tool dictionaries
-        """
-        if server_name not in self.servers:
-            logger.warning(
-                "Cannot discover tools from unknown server", server_name=server_name
-            )
-            return []
-
-        connection = self.servers[server_name]
-        if not connection.connected:
-            logger.warning(
-                "Cannot discover tools from disconnected server",
-                server_name=server_name,
-            )
-            return []
-
-        try:
-            logger.debug("Discovering tools from server", server_name=server_name)
-
-            # Use async MCP operations
-            tools_data = await self._async_discover_tools(connection.session)
-
-            if tools_data:
-                # Process discovered tools
-                for tool_data in tools_data:
-                    tool = MCPTool(
-                        name=tool_data.get("name", ""),
-                        description=tool_data.get("description", ""),
-                        server_name=server_name,
-                        full_name=f"{server_name}.{tool_data.get('name', '')}",
-                        schema=tool_data.get("schema"),
-                    )
-
-                    # Handle tool name conflicts
-                    if tool.name in self.available_tools:
-                        # Use full name for conflicts
-                        existing_tool = self.available_tools[tool.name]
-                        logger.warning(
-                            "Tool name conflict detected",
-                            tool_name=tool.name,
-                            existing_server=existing_tool.server_name,
-                            new_server=server_name,
-                        )
-                        # Store with full name
-                        self.available_tools[tool.full_name] = tool
-                        connection.tools[tool.full_name] = tool
-                    else:
-                        # Store with simple name
-                        self.available_tools[tool.name] = tool
-                        connection.tools[tool.name] = tool
-
-                # Update server health
-                if server_name in self.server_health:
-                    self.server_health[server_name].tool_count = len(connection.tools)
-
-                logger.info(
-                    "Tools discovered from server",
-                    server_name=server_name,
-                    tool_count=len(connection.tools),
-                )
-
-                return tools_data
-            else:
-                logger.info("No tools found on server", server_name=server_name)
-                return []
-
-        except Exception as e:
-            error_msg = f"Tool discovery failed: {str(e)}"
-            logger.error(
-                "Error discovering tools from server",
-                server_name=server_name,
-                error=error_msg,
-            )
-
-            if server_name in self.server_health:
-                self.server_health[server_name].error_message = error_msg
-
-            return []
+    # Tool discovery is now handled during connection, this method is no longer needed
 
     async def _async_discover_tools(
         self, session: ClientSession
@@ -453,7 +367,7 @@ class MCPManager:
                         "name": tool.name,
                         "description": tool.description or "No description available",
                         "schema": (
-                            tool.inputSchema.model_dump()
+                            tool.inputSchema
                             if hasattr(tool, "inputSchema") and tool.inputSchema
                             else {}
                         ),
@@ -491,7 +405,7 @@ class MCPManager:
                         "name": tool.name,
                         "description": tool.description or "No description available",
                         "schema": (
-                            tool.inputSchema.model_dump()
+                            tool.inputSchema
                             if hasattr(tool, "inputSchema") and tool.inputSchema
                             else {}
                         ),
@@ -508,21 +422,7 @@ class MCPManager:
             logger.error("Sync tool discovery failed", error=str(e))
             return None
 
-    async def _discover_all_tools(self) -> None:
-        """Discover tools from all connected servers."""
-        discovery_tasks = []
-        for server_name in self.servers:
-            task = asyncio.create_task(
-                self.discover_tools_from_server(server_name),
-                name=f"discover_{server_name}",
-            )
-            discovery_tasks.append(task)
-
-        if discovery_tasks:
-            try:
-                await asyncio.gather(*discovery_tasks, return_exceptions=True)
-            except Exception as e:
-                logger.error("Error during tool discovery", error=str(e))
+    # Tool discovery is now handled during connection, this method is no longer needed
 
     async def execute_tool(self, tool_name: str, arguments: Dict) -> ToolResult:
         """
